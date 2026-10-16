@@ -1,0 +1,16 @@
+[package]
+name = "disklens-core"
+description = "DiskLens scanner engine: parallel directory walk, MFT reader, compact tree, treemap layout."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+crossbeam-channel.workspace = true
+serde.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+disklens-fixtures = { path = "../disklens-fixtures" }

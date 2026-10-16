@@ -1,0 +1,8 @@
+[package]
+name = "disklens-fixtures"
+description = "Builds fake directory trees (files, hard links, junctions, symlinks) for DiskLens tests and benchmarks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
