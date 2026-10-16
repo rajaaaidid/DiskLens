@@ -27,6 +27,9 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   other: "Other",
 };
 
+/** Category by numeric id; must match `disklens_core::category::Category`. */
+export const CATEGORY_BY_ID: Category[] = ["folder", "video", "image", "audio", "archive", "executable", "document", "code", "system", "other"];
+
 export const CATEGORY_ORDER: Category[] = [
   "video",
   "image",

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1b5e"/>
+      <stop offset="0.55" stop-color="#16244f"/>
+      <stop offset="1" stop-color="#083a46"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0.25" cy="0.2" r="0.6">
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0.85" cy="0.85" r="0.6">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.08"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#67e8f9"/>
+    </linearGradient>
+    <clipPath id="lensClip"><circle cx="452" cy="452" r="232"/></clipPath>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#glowA)"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#glowB)"/>
+  <rect x="66" y="66" width="892" height="892" rx="206" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <!-- treemap tiles seen through the lens -->
+  <g clip-path="url(#lensClip)">
+    <rect x="212" y="212" width="480" height="480" fill="#0b1030" opacity="0.6"/>
+    <rect x="226" y="226" width="250" height="300" rx="22" fill="#8b5cf6" opacity="0.85"/>
+    <rect x="488" y="226" width="190" height="170" rx="22" fill="#22d3ee" opacity="0.85"/>
+    <rect x="488" y="408" width="90" height="118" rx="18" fill="#f59e0b" opacity="0.9"/>
+    <rect x="588" y="408" width="90" height="118" rx="18" fill="#f43f5e" opacity="0.85"/>
+    <rect x="226" y="538" width="160" height="140" rx="20" fill="#10b981" opacity="0.85"/>
+    <rect x="398" y="538" width="280" height="140" rx="20" fill="#64748b" opacity="0.85"/>
+    <rect x="212" y="212" width="480" height="200" fill="#fff" opacity="0.12"/>
+  </g>
+  <circle cx="452" cy="452" r="232" fill="none" stroke="url(#lens)" stroke-width="44"/>
+  <path d="M290 380 A175 175 0 0 1 400 286" fill="none" stroke="#fff" stroke-opacity="0.75" stroke-width="22" stroke-linecap="round"/>
+  <path d="M630 630 L792 792" stroke="url(#lens)" stroke-width="72" stroke-linecap="round"/>
+</svg>

@@ -2,19 +2,63 @@
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
 
-> **Status:** milestone (a), the scanner engine and CLI, is done. Milestone (b), a static UI mockup with fake
-> data, is waiting for design sign-off. The Tauri app, MFT fast path and actions come in milestones (c)–(f).
+> **Status:** milestones (a) scanner + CLI, (b) design mockup and (c) the glass treemap on real scan data in
+> Tauri are done. Next up: (d) tree-list ↔ treemap linking, space-hog insights and actions; (e) MFT fast path;
+> (f) polish.
+
+![C: drive, light theme](docs/screens/c-drive-light.png)
 
 ## Layout
 
 ```
-crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader (WIP), treemap layout, analysis
+crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader (WIP), treemap layout, categories
 crates/disklens-cli       `disklens` command-line tool (scan, bench, fixture)
 crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
-app/ui                    React + TypeScript + WebGL2 front end (currently the design mockup)
-docs/mockup               mockup screenshots (dark / light)
-scripts                   screenshot + UI benchmark helpers
+app/ui                    React + TypeScript + WebGL2 front end
+app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
+docs/mockup, docs/screens screenshots (fake-data mockup / real app)
+scripts                   screenshot, window capture and UI benchmark helpers
 ```
+
+## Desktop app
+
+```bash
+npm --prefix app/ui install
+```
+
+Run in development (hot-reloading UI, release-optimised scanner):
+
+```bash
+npm --prefix app/ui run tauri dev -- --release
+```
+
+Build an installer (`target\release\bundle\nsis\…-setup.exe`). This is not verified yet: packaging is part of
+milestone (f), and the Tauri bundler downloads NSIS the first time it runs.
+
+```bash
+npm --prefix app/ui run tauri build
+```
+
+Command-line options of the app:
+
+- `DiskLens.exe D:\Games` starts scanning that folder or drive immediately.
+- `--focus <path>` zooms the treemap to a folder once the scan finishes.
+- `--theme light|dark` picks the theme.
+
+How the app works:
+
+- **Streaming:** the scan runs on a background thread. `scan-progress` events reach the UI every 120 ms, and the UI
+  pulls a fresh layout at most every 450 ms, so the treemap fills in while the scan runs. Folders that are still
+  being read shimmer.
+- **Binary layout:** `treemap_layout` returns a binary payload (48 bytes per block, plus names; see
+  `src-tauri/src/encode.rs`) rather than JSON. The UI decodes it straight into the WebGL instance buffer.
+- **Animation:** zooming plays a 300 ms camera morph. Streamed refreshes and window resizes glide blocks to their new
+  positions in 240 ms, and labels move with them.
+- **Window:** frameless with a custom title bar. The Mica backdrop comes from `window-vibrancy`, falling back to
+  Acrylic on Windows 10. The aurora is drawn at 88% opacity so Mica tints through.
+
+In a plain browser (`npm --prefix app/ui run dev`), the UI uses a mock backend with the fake C: tree. That keeps
+design review and screenshots possible without Tauri.
 
 ## Prerequisites
 
@@ -80,6 +124,12 @@ The tree is stored as columns indexed by `u32` node IDs (`parent`, `first_child`
 `alloc`, `files`, `dirs`, `mtime`, `ext`, `flags`). All names live in one interned string buffer, and extensions are
 interned to `u16`. That works out to about 53 bytes per node plus the name.
 
+Inspect one folder of a scan (useful for checking totals):
+
+```bash
+target\release\disklens.exe scan C:\Users\me --show AppData\Local
+```
+
 ## Benchmarks (this machine)
 
 Ryzen 5 5500 (6C/12T), NVMe SSD, Windows 11, Defender real-time protection on.
@@ -90,6 +140,12 @@ Ryzen 5 5500 (6C/12T), NVMe SSD, Windows 11, Defender real-time protection on.
 | `C:\` (300 GB) | 944k / 240k | walk, warm | **20.6 s** | 153 MB |
 | `C:\` (318 GB*) | 1.03M / 240k | FindFirstFileEx, warm | 20.8 s | 137 MB |
 | `C:\Program Files` | 106k / 12k | walk, warm | 0.5–1.0 s | 23 MB |
+
+| `C:\` in the app, streaming | 962k / 244k | walk, warm | 22–27 s | – |
+
+Wall times on C: vary by roughly ±30% from run to run on this machine, depending on background load. In the same
+session the CLI took 25–36 s. The app's tree builder is busy for only about 1.3 s of a scan, so streaming the
+layout to the UI costs almost nothing. After the scan, the tree arrays are trimmed to size: 100 MB for 1.2M nodes.
 
 \* FindFirstFileEx counts hard links once per name, so it over-reports C: by 18 GB (83k duplicate names, mostly WinSxS).
 

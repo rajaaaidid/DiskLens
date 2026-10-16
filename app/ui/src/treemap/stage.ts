@@ -19,8 +19,10 @@ class Stage {
   private fpsAcc = 0;
   private fpsFrames = 0;
 
-  attach(canvas: HTMLCanvasElement): void {
-    this.renderer = new GlassRenderer(canvas);
+  /** `translucent`: let the native window backdrop (Mica) tint through the aurora. */
+  attach(canvas: HTMLCanvasElement, translucent = false): void {
+    this.renderer = new GlassRenderer(canvas, translucent);
+    if (translucent) this.renderer.opacity = 0.88;
     this.renderer.resize();
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);

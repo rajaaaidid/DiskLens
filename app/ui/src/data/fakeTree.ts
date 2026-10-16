@@ -1,4 +1,4 @@
-﻿import { categoryForName } from "./categories";
+import { categoryForName } from "./categories";
 import type { Category, Drive, TreeNode } from "./types";
 
 // Deterministic fake C:\ drive for the design mockup. Shapes mimic a real Windows 11 machine.

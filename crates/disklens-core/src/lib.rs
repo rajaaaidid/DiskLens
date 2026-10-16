@@ -6,6 +6,7 @@
 //! - [`analysis`]: largest files/folders and extension totals.
 
 pub mod analysis;
+pub mod category;
 pub mod layout;
 pub mod scan;
 pub mod tree;

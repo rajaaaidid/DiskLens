@@ -62,6 +62,7 @@ precision highp float;
 ${AURORA_FN}
 uniform float uBlur;
 uniform float uScale; // fragCoord -> full-res px (for the low-res blurred target)
+uniform float uOpacity;
 out vec4 outColor;
 void main() {
   vec2 px = gl_FragCoord.xy * uScale;
@@ -73,7 +74,7 @@ void main() {
     col *= mix(0.80, 1.0, mix(v, 1.0, uTheme * 0.7));
     col += (hash12(px) - 0.5) / 255.0 * 2.0;
   }
-  outColor = vec4(col, 1.0);
+  outColor = vec4(col * uOpacity, uOpacity);
 }`;
 
 export const BLOCK_VS = /* glsl */ `#version 300 es
@@ -128,6 +129,7 @@ uniform vec2  uResolution;
 uniform float uTheme;
 uniform float uDpr;
 uniform float uHover;
+uniform float uTime;
 out vec4 outColor;
 
 float hash12(vec2 p) {
@@ -150,6 +152,7 @@ void main() {
   bool leaf      = mod(floor(flags / 2.0), 2.0) >= 1.0;
   bool aggregate = mod(floor(flags / 4.0), 2.0) >= 1.0;
   bool isDir     = mod(floor(flags / 8.0), 2.0) >= 1.0;
+  bool pending   = mod(floor(flags / 16.0), 2.0) >= 1.0;
 
   float minSide = min(vHalf.x, vHalf.y) * 2.0;
   float radius = clamp(minSide * 0.22, 0.0, 7.0);
@@ -207,6 +210,12 @@ void main() {
   col = mix(col, vec3(1.0), rim * rimStrength);
   // light theme: thin darker contour just outside the rim so tiles separate on pale glass
   if (uTheme > 0.5) col = mix(col, tint * 0.45, (1.0 - smoothstep(0.0, 0.9, abs(d + 0.5))) * 0.22);
+
+  // still scanning: a soft diagonal shimmer sweeps across the tile
+  if (pending) {
+    float sweep = fract((gl_FragCoord.x + gl_FragCoord.y) / (420.0 * uDpr) - uTime * 0.6);
+    col += smoothstep(0.0, 0.15, sweep) * (1.0 - smoothstep(0.15, 0.35, sweep)) * 0.07;
+  }
 
   // grain
   col += (hash12(gl_FragCoord.xy) - 0.5) * 0.028;

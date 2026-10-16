@@ -38,6 +38,9 @@ enum Cmd {
         /// Hide the live progress line.
         #[arg(long)]
         quiet: bool,
+        /// After scanning, list the children of this sub-path (relative to the scan root).
+        #[arg(long)]
+        show: Option<String>,
     },
     /// Scan repeatedly and report timing and memory.
     Bench {
@@ -67,7 +70,7 @@ enum Cmd {
 fn main() {
     let cli = Cli::parse();
     let code = match cli.cmd {
-        Cmd::Scan { path, top, method, threads, json, quiet } => run_scan(path, top, method, threads, json, quiet),
+        Cmd::Scan { path, top, method, threads, json, quiet, show } => run_scan(path, top, method, threads, json, quiet, show),
         Cmd::Bench { path, runs, method, threads } => run_bench(path, runs, method, threads),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
@@ -86,7 +89,7 @@ fn main() {
     std::process::exit(code);
 }
 
-fn run_scan(path: PathBuf, top: usize, method: Method, threads: usize, json: bool, quiet: bool) -> i32 {
+fn run_scan(path: PathBuf, top: usize, method: Method, threads: usize, json: bool, quiet: bool, show: Option<String>) -> i32 {
     let progress = Arc::new(Progress::default());
     let opts = ScanOptions { root: path, method, threads };
 
@@ -131,6 +134,33 @@ fn run_scan(path: PathBuf, top: usize, method: Method, threads: usize, json: boo
         }
     };
     let tree = res.tree.read().unwrap();
+    if let Some(sub) = show {
+        let mut cur = 0;
+        for part in sub.split(['\\', '/']).filter(|s| !s.is_empty()) {
+            match tree.child_by_name(cur, part) {
+                Some(c) => cur = c,
+                None => {
+                    eprintln!("{sub}: '{part}' not found under {}", tree.path(cur));
+                    return 1;
+                }
+            }
+        }
+        use disklens_core::tree::flags as f;
+        println!("{}  {}  {} files  {} folders  flags {:#04x}", tree.path(cur), format_bytes(tree.size[cur as usize]), tree.files[cur as usize], tree.dirs[cur as usize], tree.flags[cur as usize]);
+        let mut kids: Vec<_> = tree.children(cur).collect();
+        kids.sort_by_key(|&c| std::cmp::Reverse(tree.size[c as usize]));
+        for c in kids {
+            let fl = tree.flags[c as usize];
+            let mut tags = Vec::new();
+            for (bit, name) in [(f::LINK, "link"), (f::INACCESSIBLE, "denied"), (f::HARDLINK_DUP, "hardlink-dup"), (f::REPARSE_OTHER, "reparse"), (f::SCANNED, "scanned")] {
+                if fl & bit != 0 {
+                    tags.push(name);
+                }
+            }
+            println!("  {:>10}  {:>8} files  {}{}  [{}]", format_bytes(tree.size[c as usize]), tree.files[c as usize], tree.name(c), if tree.is_dir(c) { "\\" } else { "" }, tags.join(","));
+        }
+        return 0;
+    }
     let files = largest_files(&tree, top);
     let folders = largest_folders(&tree, top);
     let exts = extension_totals(&tree);

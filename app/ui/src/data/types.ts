@@ -36,4 +36,6 @@ export interface Drive {
   fs: string;
   total: number;
   free: number;
+  /** fixed | removable | network | ram | other */
+  kind?: string;
 }

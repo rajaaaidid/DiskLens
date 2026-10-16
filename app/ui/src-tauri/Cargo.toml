@@ -1,0 +1,24 @@
+[package]
+name = "disklens-app"
+description = "DiskLens desktop app (Tauri 2 shell around disklens-core)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "disklens_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+disklens-core = { path = "../../../crates/disklens-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+window-vibrancy = "0.6"
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

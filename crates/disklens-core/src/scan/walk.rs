@@ -86,7 +86,12 @@ pub(crate) fn parallel_walk(root: &Path, strategy: Strategy, threads: usize, pro
                     }
                     let mut entries = Vec::new();
                     let t0 = std::time::Instant::now();
-                    let r = enumerate::enumerate_dir(&task.path, &level, cluster, &mut buf, &mut entries);
+                    // A panic must never silently end the walk: report it as a failed folder instead.
+                    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| enumerate::enumerate_dir(&task.path, &level, cluster, &mut buf, &mut entries)))
+                        .unwrap_or_else(|p| {
+                            let what = p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_default();
+                            Err(std::io::Error::other(format!("internal error while reading folder: {what}")))
+                        });
                     enum_ns.fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
                     let msg = match r {
                         Ok(()) => Msg::Batch { id: task.id, path: task.path, entries },
@@ -173,6 +178,11 @@ pub(crate) fn parallel_walk(root: &Path, strategy: Strategy, threads: usize, pro
             task_tx.send(task).unwrap();
         }
         busy += b0.elapsed();
+    }
+    if pending > 0 && !progress.is_cancelled() {
+        // Workers went away with folders still queued. Never return a silently partial tree.
+        inaccessible.push(Inaccessible { path: root_path.clone(), error: format!("scan incomplete: {pending} folders were not read") });
+        progress.errors.fetch_add(1, Ordering::Relaxed);
     }
     if profile {
         eprintln!("[profile] threads {threads}: enumerate {:.1}s total across workers, builder busy {:.2}s idle {:.2}s", enum_ns.load(Ordering::Relaxed) as f64 / 1e9, busy.as_secs_f64(), idle.as_secs_f64());

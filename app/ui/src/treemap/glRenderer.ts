@@ -7,6 +7,8 @@ export const FLAG_OVERLAY = 1;
 export const FLAG_LEAF = 2;
 export const FLAG_AGGREGATE = 4;
 export const FLAG_DIR = 8;
+/** Folder still being scanned: drawn with a moving shimmer. */
+export const FLAG_PENDING = 16;
 
 export interface Viewport {
   /** Treemap origin + size in CSS px, window space. */
@@ -63,14 +65,17 @@ export class GlassRenderer {
   /** Seconds of aurora animation; frozen when reduced motion is on. */
   time = 0;
 
-  constructor(private canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, premultipliedAlpha: true, powerPreference: "high-performance" });
+  /** Background opacity (< 1 lets a native Mica/Acrylic window backdrop show through). */
+  opacity = 1;
+
+  constructor(private canvas: HTMLCanvasElement, translucent = false) {
+    const gl = canvas.getContext("webgl2", { antialias: false, alpha: translucent, premultipliedAlpha: true, powerPreference: "high-performance" });
     if (!gl) throw new Error("WebGL2 not available");
     this.gl = gl;
     this.auroraProg = program(gl, FULLSCREEN_VS, AURORA_FS);
     this.blockProg = program(gl, BLOCK_VS, BLOCK_FS);
-    for (const n of ["uTime", "uTheme", "uResolution", "uBlur", "uScale"]) this.uA[n] = gl.getUniformLocation(this.auroraProg, n);
-    for (const n of ["uOrigin", "uResolution", "uDpr", "uHover", "uBlurTex", "uTheme"]) this.uB[n] = gl.getUniformLocation(this.blockProg, n);
+    for (const n of ["uTime", "uTheme", "uResolution", "uBlur", "uScale", "uOpacity"]) this.uA[n] = gl.getUniformLocation(this.auroraProg, n);
+    for (const n of ["uOrigin", "uResolution", "uDpr", "uHover", "uBlurTex", "uTheme", "uTime"]) this.uB[n] = gl.getUniformLocation(this.blockProg, n);
 
     this.emptyVao = gl.createVertexArray()!;
 
@@ -158,6 +163,7 @@ export class GlassRenderer {
       gl.viewport(0, 0, this.blurW, this.blurH);
       gl.uniform1f(this.uA.uBlur, 0.09);
       gl.uniform1f(this.uA.uScale, W / this.blurW);
+      gl.uniform1f(this.uA.uOpacity, 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
@@ -166,6 +172,7 @@ export class GlassRenderer {
     gl.viewport(0, 0, W, H);
     gl.uniform1f(this.uA.uBlur, 0);
     gl.uniform1f(this.uA.uScale, 1);
+    gl.uniform1f(this.uA.uOpacity, this.opacity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     if (this.instanceCount === 0) return;
@@ -179,6 +186,7 @@ export class GlassRenderer {
     gl.uniform1f(this.uB.uDpr, dpr);
     gl.uniform1f(this.uB.uHover, this.hover);
     gl.uniform1f(this.uB.uTheme, this.theme);
+    gl.uniform1f(this.uB.uTime, this.time);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     // Clip to the treemap area (with room for the hover shadow to spill a little).
