@@ -55,6 +55,23 @@ enum Cmd {
     /// Scan a drive with the MFT reader and with the directory walk, and compare the results
     /// (needs administrator rights).
     Compare { path: PathBuf },
+    /// Scan, then export the result as CSV or JSON.
+    Export {
+        path: PathBuf,
+        #[arg(long, default_value = "csv")]
+        format: disklens_core::export::Format,
+        /// Output file (default: stdout).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Folders only (no files).
+        #[arg(long)]
+        folders_only: bool,
+        /// Levels below the root to include.
+        #[arg(long)]
+        depth: Option<u32>,
+        #[arg(long, default_value = "auto")]
+        method: Method,
+    },
     /// Generate a fake directory tree for testing and benchmarks.
     Fixture {
         path: PathBuf,
@@ -76,6 +93,7 @@ fn main() {
         Cmd::Scan { path, top, method, threads, json, quiet, show } => run_scan(path, top, method, threads, json, quiet, show),
         Cmd::Bench { path, runs, method, threads } => run_bench(path, runs, method, threads),
         Cmd::Compare { path } => run_compare(path),
+        Cmd::Export { path, format, out, folders_only, depth, method } => run_export(path, format, out, folders_only, depth, method),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
             match disklens_fixtures::generate(&path, files, depth, max_file, seed) {
@@ -260,6 +278,44 @@ fn run_bench(path: PathBuf, runs: usize, method: Method, threads: usize) -> i32 
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!("best {:.2} s, median {:.2} s (run 1 is the coldest)", times[0], times[times.len() / 2]);
     0
+}
+
+fn run_export(path: PathBuf, format: disklens_core::export::Format, out: Option<PathBuf>, folders_only: bool, depth: Option<u32>, method: Method) -> i32 {
+    use std::io::Write;
+    let progress = Progress::default();
+    let res = match scan(&ScanOptions { root: path, method, threads: 0 }, &progress, None) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("scan failed: {e}");
+            return 1;
+        }
+    };
+    let tree = res.tree.read().unwrap();
+    let opts = disklens_core::export::Options { format, root: 0, folders_only, max_depth: depth };
+    let t0 = Instant::now();
+    let result = match &out {
+        Some(p) => std::fs::File::create(p).and_then(|f| {
+            let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
+            let s = disklens_core::export::export(&tree, opts, &mut w)?;
+            w.flush()?;
+            Ok(s)
+        }),
+        None => {
+            let stdout = std::io::stdout();
+            let mut w = std::io::BufWriter::new(stdout.lock());
+            disklens_core::export::export(&tree, opts, &mut w).and_then(|s| w.flush().map(|_| s))
+        }
+    };
+    match result {
+        Ok(s) => {
+            eprintln!("exported {} items in {:.2} s (scan {:.2} s)", s.items, t0.elapsed().as_secs_f64(), res.elapsed.as_secs_f64());
+            0
+        }
+        Err(e) => {
+            eprintln!("export failed: {e}");
+            1
+        }
+    }
 }
 
 fn run_compare(path: PathBuf) -> i32 {

@@ -21,6 +21,16 @@ export function formatPercent(part: number, whole: number): string {
   return p >= 10 ? `${p.toFixed(0)}%` : `${p.toFixed(1)}%`;
 }
 
+/** "just now", "5 min ago", "2 h ago", "3 days ago", else a date. */
+export function formatAgo(ms: number, now = Date.now()): string {
+  const s = Math.max(0, (now - ms) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 14 * 86_400) return `${Math.round(s / 86_400)} days ago`;
+  return formatDate(ms);
+}
+
 export function formatDate(ms: number): string {
   return new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }

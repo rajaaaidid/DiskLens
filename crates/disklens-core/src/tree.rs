@@ -300,3 +300,152 @@ impl Tree {
         }
     }
 }
+
+
+// ---------------------------------------------------------------------------------------------
+// Snapshot: the whole tree as one byte buffer (columns written as-is, little-endian), used by the
+// scan cache. Decoding validates every length and index, so a damaged file is an error, not a panic.
+
+const SNAPSHOT_MAGIC: &[u8; 8] = b"DLTREE01";
+
+fn put_u32s(out: &mut Vec<u8>, v: &[u32]) {
+    out.reserve(v.len() * 4);
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+}
+fn put_u64s(out: &mut Vec<u8>, v: &[u64]) {
+    out.reserve(v.len() * 8);
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+}
+fn put_u16s(out: &mut Vec<u8>, v: &[u16]) {
+    out.reserve(v.len() * 2);
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+}
+
+struct Reader<'a> {
+    b: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn take(&mut self, n: usize) -> std::io::Result<&'a [u8]> {
+        let end = self.pos.checked_add(n).filter(|&e| e <= self.b.len()).ok_or_else(|| bad("truncated snapshot"))?;
+        let s = &self.b[self.pos..end];
+        self.pos = end;
+        Ok(s)
+    }
+    fn u32(&mut self) -> std::io::Result<u32> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+    fn u32s(&mut self, n: usize) -> std::io::Result<Vec<u32>> {
+        Ok(self.take(n.checked_mul(4).ok_or_else(|| bad("size overflow"))?)?.chunks_exact(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect())
+    }
+    fn u64s(&mut self, n: usize) -> std::io::Result<Vec<u64>> {
+        Ok(self.take(n.checked_mul(8).ok_or_else(|| bad("size overflow"))?)?.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect())
+    }
+    fn u16s(&mut self, n: usize) -> std::io::Result<Vec<u16>> {
+        Ok(self.take(n.checked_mul(2).ok_or_else(|| bad("size overflow"))?)?.chunks_exact(2).map(|c| u16::from_le_bytes(c.try_into().unwrap())).collect())
+    }
+}
+
+fn bad(msg: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string())
+}
+
+impl Tree {
+    /// Serialize the tree (uncompressed).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let n = self.len();
+        let mut out = Vec::with_capacity(16 + n * 53 + self.names.len());
+        out.extend_from_slice(SNAPSHOT_MAGIC);
+        out.extend_from_slice(&(n as u32).to_le_bytes());
+        put_u32s(&mut out, &self.parent);
+        put_u32s(&mut out, &self.first_child);
+        put_u32s(&mut out, &self.child_count);
+        put_u32s(&mut out, &self.name_off);
+        put_u16s(&mut out, &self.name_len);
+        put_u64s(&mut out, &self.size);
+        put_u64s(&mut out, &self.alloc);
+        put_u32s(&mut out, &self.files);
+        put_u32s(&mut out, &self.dirs);
+        put_u64s(&mut out, &self.mtime);
+        put_u16s(&mut out, &self.ext);
+        out.extend_from_slice(&self.flags);
+        out.extend_from_slice(&(self.names.len() as u32).to_le_bytes());
+        out.extend_from_slice(self.names.as_bytes());
+        out.extend_from_slice(&(self.ext_names.len() as u32).to_le_bytes());
+        for e in &self.ext_names {
+            out.extend_from_slice(&(e.len() as u32).to_le_bytes());
+            out.extend_from_slice(e.as_bytes());
+        }
+        out
+    }
+
+    /// Rebuild a tree written by [`Tree::to_bytes`], checking that every index and slice is in range.
+    pub fn from_bytes(b: &[u8]) -> std::io::Result<Tree> {
+        let mut r = Reader { b, pos: 0 };
+        if r.take(8)? != SNAPSHOT_MAGIC {
+            return Err(bad("not a DiskLens tree snapshot"));
+        }
+        let n = r.u32()? as usize;
+        if n == 0 || n > b.len() {
+            return Err(bad("implausible node count"));
+        }
+        let mut t = Tree {
+            parent: r.u32s(n)?,
+            first_child: r.u32s(n)?,
+            child_count: r.u32s(n)?,
+            name_off: r.u32s(n)?,
+            name_len: r.u16s(n)?,
+            size: r.u64s(n)?,
+            alloc: r.u64s(n)?,
+            files: r.u32s(n)?,
+            dirs: r.u32s(n)?,
+            mtime: r.u64s(n)?,
+            ext: r.u16s(n)?,
+            flags: r.take(n)?.to_vec(),
+            ..Default::default()
+        };
+        let names_len = r.u32()? as usize;
+        t.names = String::from_utf8(r.take(names_len)?.to_vec()).map_err(|_| bad("names are not UTF-8"))?;
+        let ext_count = r.u32()? as usize;
+        if ext_count == 0 || ext_count > u16::MAX as usize + 1 {
+            return Err(bad("implausible extension count"));
+        }
+        for _ in 0..ext_count {
+            let len = r.u32()? as usize;
+            let e = String::from_utf8(r.take(len)?.to_vec()).map_err(|_| bad("extension is not UTF-8"))?;
+            t.ext_names.push(e);
+        }
+        for (i, e) in t.ext_names.iter().enumerate().skip(1) {
+            t.ext_lookup.insert(e.clone(), i as u16);
+        }
+        // Validate structure so later indexing can't go out of bounds.
+        if t.parent[0] != NONE {
+            return Err(bad("root has a parent"));
+        }
+        for i in 0..n {
+            let p = t.parent[i];
+            if i > 0 && (p == NONE || p as usize >= i) {
+                return Err(bad("parent index out of order"));
+            }
+            let (o, l) = (t.name_off[i] as usize, t.name_len[i] as usize);
+            if o + l > t.names.len() || !t.names.is_char_boundary(o) || !t.names.is_char_boundary(o + l) {
+                return Err(bad("name out of range"));
+            }
+            if t.ext[i] as usize >= t.ext_names.len() {
+                return Err(bad("extension index out of range"));
+            }
+            let (f, c) = (t.first_child[i], t.child_count[i] as usize);
+            if f != NONE && (f as usize <= i || f as usize + c > n) {
+                return Err(bad("children out of range"));
+            }
+        }
+        Ok(t)
+    }
+}

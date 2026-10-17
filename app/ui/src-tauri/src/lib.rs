@@ -11,6 +11,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use disklens_core::actions::{self, RecycleItem};
+use disklens_core::cache::{self, CacheMeta};
+use disklens_core::export;
 use disklens_core::analysis::{extension_totals, largest_files, largest_folders, ExtTotal, Ranked};
 use disklens_core::hogs::{find_hogs, Hog};
 use disklens_core::protect::{protection, Protection};
@@ -42,6 +44,10 @@ struct ScanMeta {
     cancelled: bool,
     elapsed_ms: u64,
     inaccessible: Vec<Inaccessible>,
+    /// When the scan finished (Unix ms).
+    scanned_at_ms: u64,
+    /// Loaded from the scan cache rather than scanned just now.
+    from_cache: bool,
 }
 
 /// Everything the insights panel shows, computed from the live (non-deleted) part of the tree.
@@ -55,6 +61,8 @@ fn build_summary(generation: u64, t: &Tree, meta: &ScanMeta) -> (Summary, Vec<u8
         fallback_reason: meta.fallback_reason.clone(),
         cancelled: meta.cancelled,
         elapsed_ms: meta.elapsed_ms,
+        scanned_at_ms: meta.scanned_at_ms,
+        from_cache: meta.from_cache,
         files: t.files[0] as u64,
         dirs: t.dirs[0] as u64,
         size: t.size[0],
@@ -69,6 +77,27 @@ fn build_summary(generation: u64, t: &Tree, meta: &ScanMeta) -> (Summary, Vec<u8
         hogs: find_hogs(t),
     };
     (summary, dominant)
+}
+
+/// Write the scan cache on a background thread (the tree is read-locked while it is serialized).
+fn save_cache_async(tree: Arc<RwLock<Tree>>, meta: ScanMeta) {
+    std::thread::spawn(move || {
+        let t = tree.read().unwrap();
+        let cm = CacheMeta {
+            root: t.path(0),
+            scanned_at_ms: meta.scanned_at_ms,
+            method: meta.method,
+            fallback_reason: meta.fallback_reason.clone(),
+            elapsed_ms: meta.elapsed_ms,
+            inaccessible: meta.inaccessible.clone(),
+            size: t.size[0],
+            files: t.files[0] as u64,
+            dirs: t.dirs[0] as u64,
+        };
+        if let Err(e) = cache::save(&cm, &t) {
+            eprintln!("could not save the scan cache: {e}");
+        }
+    });
 }
 
 #[derive(Default)]
@@ -100,6 +129,8 @@ struct Summary {
     fallback_reason: Option<String>,
     cancelled: bool,
     elapsed_ms: u64,
+    scanned_at_ms: u64,
+    from_cache: bool,
     files: u64,
     dirs: u64,
     size: u64,
@@ -200,9 +231,14 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
                     cancelled: res.cancelled,
                     elapsed_ms: res.elapsed.as_millis() as u64,
                     inaccessible: res.inaccessible,
+                    scanned_at_ms: cache::now_ms(),
+                    from_cache: false,
                 };
                 let (summary, dominant) = build_summary(generation, &tree.read().unwrap(), &meta);
                 let summary = Arc::new(summary);
+                if !meta.cancelled {
+                    save_cache_async(tree.clone(), meta.clone());
+                }
                 let mut s = st.0.lock().unwrap();
                 if s.generation == generation {
                     s.dominant = Some(Arc::new(dominant));
@@ -587,9 +623,87 @@ async fn recycle_nodes(app: AppHandle, state: State<'_, AppState>, generation: u
                 }
             }
             let _ = app.emit("summary-updated", summary.as_ref());
+            // Keep the cache in step with what is on disk now.
+            if !meta.cancelled {
+                save_cache_async(tree.clone(), meta);
+            }
         }
     }
     Ok(RecycleResponse { recycled, failed, permanently_deleted: out.permanently_deleted, freed })
+}
+
+/// Cached scans, newest first (for the drive picker).
+#[tauri::command]
+fn list_caches() -> Vec<CacheMeta> {
+    cache::list()
+}
+
+/// Open the cached scan of `root` instantly: becomes the current session, then `scan-done` is emitted
+/// exactly as for a fresh scan (with `fromCache` set). Returns the new generation.
+#[tauri::command]
+async fn open_cache(app: AppHandle, state: State<'_, AppState>, root: String) -> Result<u64, String> {
+    let (cm, tree) = tauri::async_runtime::spawn_blocking(move || cache::load(&root)).await.map_err(|e| e.to_string())?.map_err(|e| format!("Couldn't open the cached scan: {e}"))?;
+    let meta = ScanMeta {
+        method: cm.method,
+        fallback_reason: cm.fallback_reason,
+        cancelled: false,
+        elapsed_ms: cm.elapsed_ms,
+        inaccessible: cm.inaccessible,
+        scanned_at_ms: cm.scanned_at_ms,
+        from_cache: true,
+    };
+    let tree = Arc::new(RwLock::new(tree));
+    let generation = {
+        let mut s = state.0.lock().unwrap();
+        s.progress.cancel();
+        s.generation += 1;
+        s.tree = tree.clone();
+        s.progress = Arc::new(Progress::default());
+        s.scanning = false;
+        s.dominant = None;
+        s.summary = None;
+        s.meta = Some(meta.clone());
+        s.generation
+    };
+    // Build insights off the async runtime, then announce the "scan" as done.
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let (summary, dominant) = build_summary(generation, &tree.read().unwrap(), &meta);
+        let summary = Arc::new(summary);
+        let st = app2.state::<AppState>();
+        {
+            let mut s = st.0.lock().unwrap();
+            if s.generation != generation {
+                return;
+            }
+            s.dominant = Some(Arc::new(dominant));
+            s.summary = Some(summary.clone());
+        }
+        let _ = app2.emit("scan-done", summary.as_ref());
+    });
+    Ok(generation)
+}
+
+/// Export the subtree under `id` to `path` (the UI asks the user where with a save dialog).
+#[tauri::command]
+async fn export_tree(state: State<'_, AppState>, generation: u64, id: NodeId, format: String, folders_only: bool, max_depth: Option<u32>, path: String) -> Result<export::Stats, String> {
+    let (tree, current, _) = state.snapshot();
+    if generation != current {
+        return Err("stale generation".into());
+    }
+    let format: export::Format = format.parse()?;
+    tauri::async_runtime::spawn_blocking(move || -> std::io::Result<export::Stats> {
+        use std::io::Write;
+        let t = tree.read().unwrap();
+        let f = std::fs::File::create(&path)?;
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
+        let s = export::export(&t, export::Options { format, root: id, folders_only, max_depth }, &mut w)?;
+        w.flush()?;
+        Ok(s)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("Export failed: {e}"))
 }
 
 /// Open Explorer with the item selected.
@@ -652,6 +766,9 @@ pub fn run() {
             action_info,
             recycle_nodes,
             reveal_node,
+            list_caches,
+            open_cache,
+            export_tree,
             set_backdrop
         ])
         .run(tauri::generate_context!())

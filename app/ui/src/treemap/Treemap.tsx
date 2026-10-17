@@ -395,6 +395,9 @@ function buildMorph(prev: ViewBlock[], prevRoot: number, next: ViewBlock[], next
   return { start: -1, duration: zoom ? ZOOM_MS : REFRESH_MS, from, outgoing, outFrom, outTo };
 }
 
+/** Frosted dark backing for dark-theme labels (keep in sync with scripts/contrast-audit.mjs). */
+const LABEL_PILL = "rgba(8, 10, 24, 0.55)";
+
 const FONT_STACK = `"Segoe UI Variable Text", "Segoe UI Variable", "Inter", "Segoe UI", system-ui, sans-serif`;
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
@@ -431,8 +434,29 @@ function drawLabels(canvas: HTMLCanvasElement, blocks: ViewBlock[], w: number, h
   const light = theme === "light";
   const primary = light ? "rgba(10, 16, 30, 0.94)" : "rgba(255, 255, 255, 0.96)";
   const secondary = light ? "rgba(10, 16, 30, 0.70)" : "rgba(235, 240, 255, 0.76)";
-  ctx.shadowColor = light ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 10, 0.55)";
-  ctx.shadowBlur = 3;
+  const shadow = light ? "rgba(255, 255, 255, 0.7)" : "rgba(0, 0, 10, 0.55)";
+
+  /**
+   * Draw one label. In the dark theme white text can sit on a bright tile, so it gets a frosted dark
+   * pill behind it: WCAG AA (≥4.5:1) on every tile colour (see scripts/contrast-audit.mjs).
+   */
+  const label = (text: string, x: number, cy: number, fontPx: number, color: string, align: CanvasTextAlign = "left") => {
+    ctx.textAlign = align;
+    if (!light) {
+      const tw = ctx.measureText(text).width;
+      const left = align === "right" ? x - tw : x;
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = LABEL_PILL;
+      ctx.beginPath();
+      ctx.roundRect(left - 4, cy - fontPx / 2 - 2.5, tw + 8, fontPx + 5, 5);
+      ctx.fill();
+    }
+    ctx.shadowColor = shadow;
+    ctx.shadowBlur = 3;
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, cy);
+    ctx.textAlign = "left";
+  };
 
   const candidates: number[] = [];
   for (let i = 0; i < blocks.length; i++) {
@@ -452,29 +476,27 @@ function drawLabels(canvas: HTMLCanvasElement, blocks: ViewBlock[], w: number, h
       ctx.font = `600 11.5px ${FONT_STACK}`;
       const sizeW = ctx.measureText(size).width;
       const cy = b.y + b.header / 2 + 1;
-      const showSize = b.w > sizeW + 70;
-      ctx.fillStyle = primary;
-      ctx.fillText(fitText(ctx, name, b.w - 14 - (showSize ? sizeW + 10 : 0)), b.x + 7, cy);
+      const showSize = b.w > sizeW + 80;
+      const nameText = fitText(ctx, name, b.w - 18 - (showSize ? sizeW + 16 : 0));
+      if (nameText) label(nameText, b.x + 8, cy, 11.5, primary);
       if (showSize) {
         ctx.font = `500 11px ${FONT_STACK}`;
-        ctx.fillStyle = secondary;
-        ctx.textAlign = "right";
-        ctx.fillText(size, b.x + b.w - 7, cy);
-        ctx.textAlign = "left";
+        label(size, b.x + b.w - 8, cy, 11, secondary, "right");
       }
     } else {
       const big = b.w >= 90 && b.h >= 48;
-      ctx.font = `600 ${big ? 12.5 : 11}px ${FONT_STACK}`;
-      const nameText = fitText(ctx, name, b.w - 12);
+      const px = big ? 12.5 : 11;
+      ctx.font = `600 ${px}px ${FONT_STACK}`;
+      const nameText = fitText(ctx, name, b.w - 16);
       if (!nameText) continue;
-      ctx.fillStyle = primary;
       if (b.h >= 36) {
-        ctx.fillText(nameText, b.x + 7, b.y + (big ? 15 : 12));
-        ctx.font = `500 ${big ? 11.5 : 10.5}px ${FONT_STACK}`;
-        ctx.fillStyle = secondary;
-        ctx.fillText(fitText(ctx, size, b.w - 12), b.x + 7, b.y + (big ? 31 : 25));
+        label(nameText, b.x + 8, b.y + (big ? 15 : 12), px, primary);
+        const spx = big ? 11.5 : 10.5;
+        ctx.font = `500 ${spx}px ${FONT_STACK}`;
+        const sizeText = fitText(ctx, size, b.w - 16);
+        if (sizeText) label(sizeText, b.x + 8, b.y + (big ? 32 : 26), spx, secondary);
       } else {
-        ctx.fillText(nameText, b.x + 6, b.y + b.h / 2);
+        label(nameText, b.x + 8, b.y + b.h / 2, px, primary);
       }
     }
   }

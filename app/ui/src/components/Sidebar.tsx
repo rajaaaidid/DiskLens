@@ -1,6 +1,6 @@
 import type { Drive, ScanProgress, ScanSummary } from "../api";
 import { CATEGORY_LABELS, cssColor } from "../data/categories";
-import { formatBytes, formatCount } from "../data/format";
+import { formatAgo, formatBytes, formatCount } from "../data/format";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { IconBolt, IconFolder } from "./Icons";
 import { UsageRing } from "./UsageRing";
@@ -78,6 +78,8 @@ export function Sidebar({ drives, target, scanning, progress, summary, reduceMot
                     <>Scanning {target}</>
                   ) : summary?.cancelled ? (
                     <>Cancelled after {seconds.toFixed(1)} s</>
+                  ) : summary?.fromCache ? (
+                    <span title={new Date(summary.scannedAtMs).toLocaleString()}>Saved scan · {formatAgo(summary.scannedAtMs)}</span>
                   ) : (
                     <>Complete in {seconds.toFixed(1)} s</>
                   )}
@@ -93,6 +95,11 @@ export function Sidebar({ drives, target, scanning, progress, summary, reduceMot
               {scanning && (
                 <button className="chip cancel" onClick={onCancel}>
                   Cancel
+                </button>
+              )}
+              {!scanning && summary?.fromCache && target && (
+                <button className="chip" onClick={() => onScan(target)} title="Scan again for up-to-date numbers">
+                  Rescan
                 </button>
               )}
             </div>

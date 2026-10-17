@@ -2,18 +2,19 @@
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
 
-> **Status:** milestones (a)–(e) are done: the scanner and CLI, the design mockup, the glass treemap on real
-> scan data in Tauri, tree list ↔ treemap linking with space-hog insights and safe actions, and the NTFS MFT
-> fast path. The MFT path scans C: (1.06M files) in **4.5–6.3 s**, against about 30 s for the walk.
-> Next up: (f) polish (export, cache, packaging).
+> **Status:** all six milestones are done: the scanner and CLI, the glass treemap on real scan data, tree list ↔
+> treemap linking with space-hog insights and safe actions, the NTFS MFT fast path (C:, 1.06M files, in
+> **4.5–6.3 s**), CSV/JSON export, an instant-reopen scan cache, a portable build, and a WCAG AA contrast pass.
+> Not done: a signed installer (see *Packaging*).
 
 ![C: drive, light theme](docs/screens/c-drive-light.png)
 
 ## Layout
 
 ```
-crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories, actions
-crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, fixture)
+crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories,
+                          actions, scan cache, export
+crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, export, fixture)
 crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
@@ -21,23 +22,37 @@ docs/mockup, docs/screens screenshots (fake-data mockup / real app)
 scripts                   screenshots, window capture, UI benchmark and the end-to-end UI flow (ui-flow.mjs)
 ```
 
-## Desktop app
+## Packaging
+
+Build a portable folder (no installer, no dev server needed):
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1
+```
+
+It produces:
+
+```
+dist\DiskLens\DiskLens.exe        the app (9.5 MB, interface embedded; needs the WebView2 runtime that ships with Windows 11)
+dist\DiskLens\cli\disklens.exe    the command-line scanner
+```
+
+The CLI lives in its own folder because Windows file names are case-insensitive, so `DiskLens.exe` and
+`disklens.exe` can't share one.
+
+For an NSIS installer, add `-Installer`. That's not verified: the Tauri bundler downloads NSIS from GitHub the
+first time, and the binaries aren't code-signed, so SmartScreen will warn on first launch.
+
+## Desktop app (development)
 
 ```bash
 npm --prefix app/ui install
 ```
 
-Run in development (hot-reloading UI, release-optimised scanner):
+Run with a hot-reloading UI and the release-optimised scanner:
 
 ```bash
 npm --prefix app/ui run tauri dev -- --release
-```
-
-Build an installer (`target\release\bundle\nsis\…-setup.exe`). This is not verified yet: packaging is part of
-milestone (f), and the Tauri bundler downloads NSIS the first time it runs.
-
-```bash
-npm --prefix app/ui run tauri build
 ```
 
 Command-line options of the app:
@@ -82,6 +97,48 @@ edits the fake data.
   - **Files:** the 50 largest files.
   - **Folders:** folders ranked by the data held directly inside them, not counting subfolders.
   - **Types:** a stacked category bar plus a per-extension breakdown.
+
+### Scan cache: reopen instantly
+
+Every finished scan (not a cancelled one) is saved in the background to `%LOCALAPPDATA%\DiskLens\cache`. It's saved
+again after each Recycle Bin action, so the cache matches what's on disk.
+
+- **Format:** the tree's column arrays plus a small JSON header, compressed with LZ4. Writes go to a temp file
+  that's renamed into place, so a crash never leaves a half-written cache. Only the 8 newest scans are kept.
+- **On disk:** the full C: scan (1.2M items) is 31 MB.
+- **Reopening:** the drive picker lists the saved scans under *Recent scans*. **Open** brings one back in 0.45 s
+  for the full C: scan and 0.23 s for small folders. The sidebar then shows *Saved scan · 2 h ago* with a
+  **Rescan** button.
+- **Safety:** loading checks every index and length, so a damaged cache file gives an error, never a crash.
+
+### Export
+
+The toolbar's export button exports the **current view**, meaning the folder you're zoomed into:
+
+- **CSV, every file and folder:** one row per item, depth-first, largest first. Columns are `path`, `type`, `size`,
+  `size_on_disk`, `files`, `folders`, `modified` (ISO-8601 UTC), `extension`, `category` and `flags`
+  (link/hardlink/inaccessible). Hard-link duplicates appear with 0 bytes so totals add up. Items you sent to the
+  Recycle Bin are left out.
+- **CSV, folders only.**
+- **JSON folder tree:** nested, 6 levels deep, with `"truncated": true` where it stops.
+
+Export is fast: 673k items take 1 s. From the CLI:
+
+```bash
+target\release\disklens.exe export C:\Users\me --format csv --out me.csv
+```
+
+```bash
+target\release\disklens.exe export D:\ --format json --folders-only --depth 4 --out d.json
+```
+
+### Accessibility
+
+Every text colour has been checked against WCAG AA (4.5:1) in the worst case: text on glass panels over the
+brightest and darkest aurora colours the shader can produce, and treemap labels over every category tint.
+`node scripts/contrast-audit.mjs` re-runs the check, and the build should keep it passing. In the dark theme,
+treemap labels sit on a small frosted pill so white text stays readable on light tiles. The app follows Windows
+*Animation effects*: when they're off, the aurora stops drifting and zooms, counters and hovers stop animating.
 
 ### Sending to the Recycle Bin: safety rules
 

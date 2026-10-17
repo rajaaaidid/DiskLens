@@ -1,18 +1,20 @@
-import type { Drive } from "../api";
-import { formatBytes } from "../data/format";
+import type { CacheEntry, Drive } from "../api";
+import { formatAgo, formatBytes, formatCount } from "../data/format";
 import { IconBolt, IconFolder, IconLens, IconShield } from "./Icons";
 import { UsageRing } from "./UsageRing";
 
 interface Props {
   drives: Drive[];
+  caches: CacheEntry[];
   elevated: boolean;
   onScan: (path: string) => void;
+  onOpenCache: (root: string) => void;
   onPickFolder: () => void;
   onRestartAsAdmin: () => void;
 }
 
 /** Start screen: every local drive as a glass card. */
-export function DrivePicker({ drives, elevated, onScan, onPickFolder, onRestartAsAdmin }: Props) {
+export function DrivePicker({ drives, caches, elevated, onScan, onOpenCache, onPickFolder, onRestartAsAdmin }: Props) {
   return (
     <div className="picker">
       <div className="picker-head">
@@ -22,6 +24,29 @@ export function DrivePicker({ drives, elevated, onScan, onPickFolder, onRestartA
           <p>Pick a drive or folder to scan. Nothing is changed on disk without your confirmation.</p>
         </div>
       </div>
+      {caches.length > 0 && (
+        <section className="recent" aria-label="Recent scans">
+          <div className="section-label">Recent scans · open instantly</div>
+          <div className="recent-list">
+            {caches.slice(0, 4).map((c) => (
+              <div key={c.root} className="recent-row glass">
+                <div className="recent-main">
+                  <span className="recent-root">{c.root}</span>
+                  <span className="recent-meta">
+                    {formatBytes(c.size)} · {formatCount(c.files)} files · scanned {formatAgo(c.scannedAtMs)}
+                  </span>
+                </div>
+                <button className="btn btn-primary" onClick={() => onOpenCache(c.root)}>
+                  Open
+                </button>
+                <button className="btn btn-secondary" onClick={() => onScan(c.root)} title="Scan again for up-to-date numbers">
+                  Rescan
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="picker-grid">
         {drives.map((d) => {
           const used = d.total - d.free;

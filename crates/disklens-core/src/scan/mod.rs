@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::tree::Tree;
 
@@ -13,7 +13,7 @@ pub mod enumerate;
 pub mod mft;
 mod walk;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Method {
     /// MFT if possible, otherwise the directory walk.
@@ -88,7 +88,7 @@ pub struct ProgressSnapshot {
     pub errors: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Inaccessible {
     pub path: String,
     pub error: String,

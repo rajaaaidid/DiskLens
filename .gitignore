@@ -3,3 +3,4 @@ node_modules/
 app/ui/dist/
 *.log
 app/ui/src-tauri/gen/
+/dist

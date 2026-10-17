@@ -40,6 +40,8 @@ function summary(): ScanSummary {
     fallbackReason: "MFT reader not implemented yet",
     cancelled: false,
     elapsedMs: 4200,
+    scannedAtMs: Date.now(),
+    fromCache: false,
     files: ROOT.files,
     dirs: nodes - ROOT.files - 1,
     size: ROOT.size,
@@ -229,6 +231,22 @@ export const mockBackend: Backend = {
     return { recycled, failed: [], permanentlyDeleted: [], freed };
   },
   reveal: async () => {},
+  listCaches: async () => [
+    { root: "C:\\", scannedAtMs: Date.now() - 2 * 3600_000, method: "walk", elapsedMs: 4200, size: ROOT.size, files: ROOT.files, dirs: byId.size - ROOT.files },
+  ],
+  openCache: async () => {
+    generation++;
+    const g = generation;
+    setTimeout(() => {
+      const s = { ...summary(), generation: g, fromCache: true, scannedAtMs: Date.now() - 2 * 3600_000 };
+      listeners.done.forEach((cb) => cb(s));
+    }, 0);
+    return g;
+  },
+  pickSavePath: async (name) => name,
+  exportTree: async () => {
+    throw new Error("Exporting needs the desktop app.");
+  },
   setBackdrop: async () => {},
   windowControl: async () => {},
 };

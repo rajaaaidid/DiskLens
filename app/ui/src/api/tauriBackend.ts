@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { CATEGORY_BY_ID } from "../data/categories";
 import { BF_AGGREGATE, type Backend, type Layout, type ViewBlock } from "./types";
 
@@ -69,6 +69,26 @@ export const tauriBackend: Backend = {
   actionInfo: (generation, id) => invoke("action_info", { generation, id }),
   recycle: (generation, ids) => invoke("recycle_nodes", { generation, ids }),
   reveal: (generation, id) => invoke("reveal_node", { generation, id }),
+  listCaches: () => invoke("list_caches"),
+  openCache: (root) => invoke("open_cache", { root }),
+  pickSavePath: async (defaultName, kind) => {
+    const json = kind === "json-tree";
+    const r = await save({
+      title: "Export scan",
+      defaultPath: defaultName,
+      filters: [json ? { name: "JSON", extensions: ["json"] } : { name: "CSV", extensions: ["csv"] }],
+    });
+    return r ?? null;
+  },
+  exportTree: (generation, id, kind, path) =>
+    invoke("export_tree", {
+      generation,
+      id,
+      path,
+      format: kind === "json-tree" ? "json" : "csv",
+      foldersOnly: kind !== "csv-all",
+      maxDepth: kind === "json-tree" ? 6 : null,
+    }),
   setBackdrop: (dark) => invoke("set_backdrop", { dark }),
   windowControl: async (action) => {
     const w = getCurrentWindow();

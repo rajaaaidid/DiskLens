@@ -57,6 +57,10 @@ export interface ScanSummary {
   fallbackReason: string | null;
   cancelled: boolean;
   elapsedMs: number;
+  /** When the scan finished (Unix ms). */
+  scannedAtMs: number;
+  /** Opened from the scan cache rather than scanned just now. */
+  fromCache: boolean;
   files: number;
   dirs: number;
   size: number;
@@ -142,6 +146,18 @@ export interface Crumb {
   size: number;
 }
 
+export interface CacheEntry {
+  root: string;
+  scannedAtMs: number;
+  method: ScanSummary["method"];
+  elapsedMs: number;
+  size: number;
+  files: number;
+  dirs: number;
+}
+
+export type ExportKind = "csv-all" | "csv-folders" | "json-tree";
+
 export interface LaunchOptions {
   scan: string | null;
   focus: string | null;
@@ -174,6 +190,13 @@ export interface Backend {
   /** Send to the Recycle Bin. Only call after the user confirmed. */
   recycle(generation: number, ids: number[]): Promise<RecycleResponse>;
   reveal(generation: number, id: number): Promise<void>;
+  /** Cached scans, newest first. */
+  listCaches(): Promise<CacheEntry[]>;
+  /** Open a cached scan instantly; resolves with its generation, then `scan-done` follows. */
+  openCache(root: string): Promise<number>;
+  /** Ask where to save; null if cancelled. */
+  pickSavePath(defaultName: string, kind: ExportKind): Promise<string | null>;
+  exportTree(generation: number, id: number, kind: ExportKind, path: string): Promise<{ items: number }>;
   setBackdrop(dark: boolean): Promise<void>;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
 }

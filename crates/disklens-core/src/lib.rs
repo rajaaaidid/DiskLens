@@ -7,6 +7,8 @@
 
 pub mod actions;
 pub mod analysis;
+pub mod cache;
+pub mod export;
 pub mod category;
 pub mod hogs;
 pub mod layout;

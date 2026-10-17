@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { backend, BF_AGGREGATE, BF_DIR, type ActionInfo, type Crumb, type Drive, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
+import { backend, BF_AGGREGATE, BF_DIR, type ActionInfo, type CacheEntry, type Crumb, type Drive, type ExportKind, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
+import { ExportMenu } from "./components/ExportMenu";
 import { mockFindId } from "./api/mockBackend";
 import { ConfirmRecycle } from "./components/ConfirmRecycle";
 import { ContextMenu, type MenuTarget } from "./components/ContextMenu";
@@ -132,7 +133,8 @@ export default function App() {
     setError(error);
   }, []);
 
-  const startScan = useCallback((path: string) => {
+  /** Start a session: a fresh scan of `path`, or (`fromCache`) its saved scan, opened instantly. */
+  const begin = useCallback((path: string, fromCache: boolean) => {
     setError(null);
     setTarget(path);
     setScanning(true);
@@ -141,8 +143,7 @@ export default function App() {
     setLayout(null);
     setRootId(0);
     setSelected(undefined);
-    backend
-      .startScan(path)
+    (fromCache ? backend.openCache(path) : backend.startScan(path))
       .then((g) => {
         if (g < genRef.current) return; // an older request resolving late
         genRef.current = g;
@@ -156,6 +157,19 @@ export default function App() {
       })
       .catch((e) => applyError(String(e)));
   }, [applyDone, applyError]);
+  const startScan = useCallback((path: string) => begin(path, false), [begin]);
+  const openCached = useCallback((root: string) => begin(root, true), [begin]);
+
+  // Saved scans for the picker; refreshed after each scan (the cache is written in the background).
+  const [caches, setCaches] = useState<CacheEntry[]>([]);
+  useEffect(() => {
+    const load = () => backend.listCaches().then(setCaches).catch(() => {});
+    load();
+    if (summary && !summary.fromCache) {
+      const t = setTimeout(load, 2500);
+      return () => clearTimeout(t);
+    }
+  }, [summary]);
 
   useEffect(() => {
     const offP = backend.onProgress((p) => {
@@ -367,6 +381,23 @@ export default function App() {
     backend.findPath(summary.generation, path).then((id) => id !== null && zoomTo(id));
   }, [summary, zoomTo]);
 
+  const exportView = useCallback(
+    async (kind: ExportKind) => {
+      const where = crumbs.length ? crumbs[crumbs.length - 1].name.replace(/[\\/:*?"<>|]+/g, "").trim() || "drive" : "scan";
+      const stamp = new Date().toISOString().slice(0, 10);
+      const name = `DiskLens ${where} ${stamp}${kind === "csv-folders" ? " folders" : ""}.${kind === "json-tree" ? "json" : "csv"}`;
+      try {
+        const path = await backend.pickSavePath(name, kind);
+        if (!path) return;
+        const s = await backend.exportTree(generation, rootId, kind, path);
+        toast("ok", `Exported ${s.items.toLocaleString()} items`, path);
+      } catch (e) {
+        toast("error", "Export failed", String(e));
+      }
+    },
+    [crumbs, generation, rootId, toast],
+  );
+
   const restartAsAdmin = useCallback(() => {
     backend.restartAsAdmin(target, theme).catch((e) => toast("info", "Still running without admin rights", String(e)));
   }, [target, theme, toast]);
@@ -396,7 +427,15 @@ export default function App() {
           }
         />
         {showPicker ? (
-          <DrivePicker drives={drives} elevated={elevated} onScan={startScan} onPickFolder={pickFolder} onRestartAsAdmin={restartAsAdmin} />
+          <DrivePicker
+            drives={drives}
+            caches={caches}
+            elevated={elevated}
+            onScan={startScan}
+            onOpenCache={openCached}
+            onPickFolder={pickFolder}
+            onRestartAsAdmin={restartAsAdmin}
+          />
         ) : (
           <div className="workspace">
             <Sidebar
@@ -443,6 +482,7 @@ export default function App() {
                   <button className="icon-btn" title="Rescan" disabled={scanning || !target} onClick={() => target && startScan(target)}>
                     <IconRescan />
                   </button>
+                  <ExportMenu disabled={scanning || !summary} onExport={exportView} />
                 </div>
               </div>
               <div className="treemap-frame">
