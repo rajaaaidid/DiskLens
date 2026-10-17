@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { backend, BF_AGGREGATE, BF_DIR, BF_INACCESSIBLE, BF_LINK, BF_PENDING, type NodeInfo } from "../api";
+import { formatAgeDays } from "../data/age";
 import { CATEGORY_LABELS, cssColor } from "../data/categories";
 import { formatBytes, formatCount, formatPercent } from "../data/format";
 import type { HoverInfo } from "../treemap/Treemap";
@@ -59,6 +60,12 @@ export function Tooltip({ hover, generation, useAlloc }: Props) {
           <>
             <span>{useAlloc ? "logical size" : "on disk"}</span>
             <b>{info ? formatBytes(useAlloc ? info.size : info.sizeOnDisk) : "…"}</b>
+          </>
+        )}
+        {b.newestDays > 0 && (
+          <>
+            <span>{isDir || agg ? "newest file" : "modified"}</span>
+            <b>{formatAgeDays(b.newestDays)}</b>
           </>
         )}
       </div>

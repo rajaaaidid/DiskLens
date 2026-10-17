@@ -5,11 +5,13 @@
 //! - [`layout`]: nested squarified treemap layout.
 //! - [`analysis`]: largest files/folders and extension totals.
 //! - [`diff`]: what changed between two scans of the same root.
+//! - [`dupes`]: files with identical contents.
 
 pub mod actions;
 pub mod analysis;
 pub mod cache;
 pub mod diff;
+pub mod dupes;
 pub mod export;
 pub mod category;
 pub mod hogs;

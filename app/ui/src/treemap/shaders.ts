@@ -126,6 +126,7 @@ in vec3 vColor;
 in vec4 vParams;
 
 uniform sampler2D uBlurTex;  // low-res pre-blurred background
+uniform float uTintBoost;    // tile tint strength multiplier (1 = file types)
 uniform vec2  uResolution;
 uniform float uTheme;
 uniform float uDpr;
@@ -176,9 +177,12 @@ void main() {
   bg = mix(vec3(lum), bg, 1.35);
 
   // --- glass body ---
-  float tintA = isDir ? 0.06 + 0.03 * depth : 0.24 + 0.035 * depth;
-  tintA = clamp(tintA, 0.06, 0.40);
-  if (uTheme > 0.5) tintA *= 1.3;
+  // uTintBoost > 1 (age colours) makes tiles carry more of their tint, so the bands stay apart over
+  // the aurora; folder frames keep their light glass.
+  float boost = isDir ? 1.0 : uTintBoost;
+  float tintA = isDir ? 0.06 + 0.03 * depth : (0.24 + 0.035 * depth) * boost;
+  tintA = clamp(tintA, 0.06, 0.40 * boost);
+  if (uTheme > 0.5) tintA = min(tintA * 1.3, 0.80);
   vec3 tint = vColor;
   vec3 glass = mix(bg, tint, tintA);
 

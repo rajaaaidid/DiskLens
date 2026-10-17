@@ -1,16 +1,42 @@
 import { useState } from "react";
-import type { Change, Hog, ScanSummary } from "../api";
+import type { Change, DupeProgress, DupeReport, DupeSet, Hog, ScanSummary } from "../api";
+import { AGE_BANDS, AGE_UNKNOWN_COLOR, cssRgb } from "../data/age";
 import { CATEGORY_LABELS, categoryForName, cssColor } from "../data/categories";
-import { formatAgo, formatBytes, formatCount, formatPercent } from "../data/format";
+import { formatAgo, formatBytes, formatCount, formatDate, formatPercent } from "../data/format";
+import type { ColorMode } from "../treemap/Treemap";
 import { IconExternal } from "./Icons";
 
-type Tab = "hogs" | "files" | "folders" | "types" | "changes";
+type Tab = "hogs" | "files" | "folders" | "types" | "age" | "dupes" | "changes";
 
-const TAB_LABELS: Record<Tab, string> = { hogs: "Hogs", files: "Files", folders: "Folders", types: "Types", changes: "Changes" };
+const TAB_LABELS: Record<Tab, string> = { hogs: "Hogs", files: "Files", folders: "Folders", types: "Types", age: "Age", dupes: "Dupes", changes: "Changes" };
+
+/** Smallest file the duplicate search looks at. */
+export const DUPE_MIN_SIZES = [
+  { bytes: 100 * 1024, label: "100 KB" },
+  { bytes: 1024 * 1024, label: "1 MB" },
+  { bytes: 10 * 1024 * 1024, label: "10 MB" },
+  { bytes: 100 * 1024 * 1024, label: "100 MB" },
+];
+
+export interface DupesState {
+  report: DupeReport | null;
+  /** Latest progress while a search runs. */
+  progress: DupeProgress | null;
+  running: boolean;
+  /** Folder the next search would cover (the current view). */
+  scopePath: string;
+}
 
 interface Props {
   summary: ScanSummary | null;
   scanning: boolean;
+  colorMode: ColorMode;
+  onColorMode: (m: ColorMode) => void;
+  dupes: DupesState;
+  onFindDupes: (minSize: number) => void;
+  onCancelDupes: () => void;
+  /** Choose which copy to keep and send the others to the Recycle Bin (asks first). */
+  onKeepOne: (set: DupeSet) => void;
   /** Select the item and show it in the treemap. */
   onReveal: (path: string) => void;
   onOpenInExplorer: (node: number) => void;
@@ -43,8 +69,9 @@ function Advice({ text }: { text: string }) {
   );
 }
 
-export function InsightsPanel({ summary, scanning, onReveal, onOpenInExplorer, onItemMenu }: Props) {
+export function InsightsPanel({ summary, scanning, colorMode, onColorMode, dupes, onFindDupes, onCancelDupes, onKeepOne, onReveal, onOpenInExplorer, onItemMenu }: Props) {
   const [tab, setTab] = useState<Tab>("hogs");
+  const [minSize, setMinSize] = useState(DUPE_MIN_SIZES[1].bytes);
   const types = summary?.extensions ?? [];
   const maxType = types[0]?.size ?? 1;
   const catTotal = summary?.categories.reduce((s, c) => s + c.size, 0) ?? 1;
@@ -105,6 +132,39 @@ export function InsightsPanel({ summary, scanning, onReveal, onOpenInExplorer, o
   };
 
   const changes = summary?.changes;
+  const age = summary?.age;
+  const ageTotal = age ? age.bands.reduce((s, b) => s + b.size, 0) + age.unknownSize : 1;
+  const ageRows = age
+    ? [
+        ...age.bands.map((b, i) => ({ key: String(i), label: AGE_BANDS[i]?.label ?? "", color: AGE_BANDS[i]?.color ?? AGE_UNKNOWN_COLOR, size: b.size, files: b.files })),
+        ...(age.unknownFiles ? [{ key: "unknown", label: "No date", color: AGE_UNKNOWN_COLOR, size: age.unknownSize, files: age.unknownFiles }] : []),
+      ]
+    : [];
+
+  const dupeRow = (f: DupeSet["files"][number]) => {
+    const { name, dir } = splitPath(f.path);
+    return (
+      <li
+        key={f.node}
+        onClick={() => onReveal(f.path)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onItemMenu(f.node, name, false, e.clientX, e.clientY);
+        }}
+        title={`${f.path}\nModified ${f.mtimeMs ? formatDate(f.mtimeMs) : "at an unknown time"}\nClick to show in the treemap · right-click for actions`}
+      >
+        <span className="swatch" style={{ background: cssColor(categoryForName(name), 0.85) }} />
+        <span className="file-main">
+          <span className="file-name">{name}</span>
+          <span className="file-path">{dir}</span>
+        </span>
+        <span className="file-size dupe-date">{f.mtimeMs ? formatDate(f.mtimeMs) : ""}</span>
+      </li>
+    );
+  };
+
+  const report = dupes.report;
+  const p = dupes.progress;
 
   return (
     <aside className="insights glass">
@@ -204,6 +264,148 @@ export function InsightsPanel({ summary, scanning, onReveal, onOpenInExplorer, o
                 <ol className="file-rank">{changes.folders.map((c, i) => changeRow(c, i + 1))}</ol>
                 <div className="section-label">Biggest changes</div>
                 <ol className="file-rank">{changes.items.map((c, i) => changeRow(c, i + 1))}</ol>
+              </>
+            )}
+          </>
+        )}
+
+        {summary && tab === "age" && age && (
+          <>
+            <div className="age-toggle">
+              <span>Treemap colours</span>
+              <div className="segmented small">
+                <button className={colorMode === "type" ? "on" : ""} onClick={() => onColorMode("type")}>
+                  Type
+                </button>
+                <button className={colorMode === "age" ? "on" : ""} onClick={() => onColorMode("age")}>
+                  Age
+                </button>
+              </div>
+            </div>
+            <p className="tab-note">When files were last modified. A folder counts as recent as the newest file inside it.</p>
+            <div className="cat-stack" aria-label="Space by age">
+              {ageRows.map((r) => (
+                <span key={r.key} title={`${r.label}: ${formatBytes(r.size)}`} style={{ flexGrow: r.size / Math.max(1, ageTotal), background: cssRgb(r.color, 0.8) }} />
+              ))}
+            </div>
+            <div className="cat-list">
+              {ageRows.map((r) => (
+                <div key={r.key} className="cat-row">
+                  <span className="swatch" style={{ background: cssRgb(r.color, 0.85) }} />
+                  <span className="cat-name">{r.label}</span>
+                  <span className="cat-files">{formatCount(r.files)} files</span>
+                  <span className="cat-pct">{formatPercent(r.size, ageTotal)}</span>
+                  <span className="cat-size">{formatBytes(r.size)}</span>
+                </div>
+              ))}
+            </div>
+            <div className="stale-callout">
+              <span className="stat-label">Not modified in {Math.round(age.staleDays / 365)}+ years</span>
+              <span className="stale-size">{formatBytes(age.staleSize)}</span>
+              <span className="stat-sub">
+                {formatCount(age.staleFiles)} files · {formatPercent(age.staleSize, ageTotal)} of the scanned data
+              </span>
+            </div>
+            {age.staleFolders.length > 0 && (
+              <>
+                <div className="section-label">Folders with the most stale data</div>
+                <p className="tab-note">Counting only stale files directly inside each folder.</p>
+                <ol className="file-rank">{age.staleFolders.slice(0, 20).map((f, i) => itemRow(f.node, f.path, f.size, true, i + 1))}</ol>
+              </>
+            )}
+            {age.staleLargest.length > 0 && (
+              <>
+                <div className="section-label">Largest stale files</div>
+                <ol className="file-rank">{age.staleLargest.map((f, i) => itemRow(f.node, f.path, f.size, false, i + 1))}</ol>
+              </>
+            )}
+          </>
+        )}
+
+        {summary && tab === "dupes" && (
+          <>
+            {!dupes.running && (
+              <div className="dupe-start">
+                <p className="tab-note">
+                  Finds files with identical contents in <b>{dupes.scopePath}</b>. Only files that share their size with another one are read, and
+                  online-only OneDrive files are skipped so nothing gets downloaded.
+                </p>
+                <div className="dupe-controls">
+                  <label>
+                    At least{" "}
+                    <select value={minSize} onChange={(e) => setMinSize(Number(e.target.value))}>
+                      {DUPE_MIN_SIZES.map((m) => (
+                        <option key={m.bytes} value={m.bytes}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="btn btn-primary" disabled={scanning} onClick={() => onFindDupes(minSize)}>
+                    {report ? "Search again" : "Find duplicates"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {dupes.running && (
+              <div className="dupe-progress">
+                <p className="change-since">{!p || p.phase <= 1 ? "Comparing the start and end of each file…" : "Comparing whole files…"}</p>
+                <div className="hog-meter">
+                  <span style={{ width: `${p && p.bytesTotal > 0 ? Math.min(100, (p.bytesDone / p.bytesTotal) * 100) : 0}%` }} />
+                </div>
+                <p className="stat-sub">
+                  {p ? `${formatCount(p.filesDone)} of ${formatCount(p.filesTotal)} files · ${formatBytes(p.bytesDone)} of ${formatBytes(p.bytesTotal)} read` : "Listing candidates…"}
+                </p>
+                <button className="btn btn-secondary" onClick={onCancelDupes}>
+                  Cancel
+                </button>
+              </div>
+            )}
+            {report && !dupes.running && (
+              <>
+                <div className="change-summary">
+                  <p className="change-since">
+                    In {report.rootPath} · files of {formatBytes(report.minSize)} or more
+                  </p>
+                  <div className="change-stats">
+                    <div>
+                      <span className="stat-label">Could free</span>
+                      <span className="delta down">{formatBytes(report.wasted)}</span>
+                      <span className="stat-sub">keeping one copy of each</span>
+                    </div>
+                    <div>
+                      <span className="stat-label">Sets</span>
+                      <span className="delta">{formatCount(report.totalSets)}</span>
+                      <span className="stat-sub">{formatCount(report.extraCopies)} extra copies</span>
+                    </div>
+                  </div>
+                  {report.cancelled && <p className="tab-note">The search was cancelled, so some duplicates may be missing.</p>}
+                  {(report.unreadable > 0 || report.skippedCloud > 0) && (
+                    <p className="tab-note">
+                      Skipped{report.unreadable > 0 && ` ${formatCount(report.unreadable)} files that couldn't be read`}
+                      {report.unreadable > 0 && report.skippedCloud > 0 && " and"}
+                      {report.skippedCloud > 0 && ` ${formatCount(report.skippedCloud)} online-only files`}.
+                    </p>
+                  )}
+                </div>
+                {report.sets.length === 0 && <p className="empty-note">No duplicates found.</p>}
+                {report.sets.map((set) => (
+                  <article key={set.files[0].node} className="hog-card dupe-card">
+                    <header>
+                      <span className="dupe-copies">
+                        {set.files.length} copies × {formatBytes(set.size)}
+                      </span>
+                      <span className="hog-size">{formatBytes(set.size * (set.files.length - 1))}</span>
+                    </header>
+                    <ul className="hog-items">{set.files.map(dupeRow)}</ul>
+                    <div className="hog-actions">
+                      <button className="chip" onClick={() => onKeepOne(set)}>
+                        Keep one…
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {report.totalSets > report.sets.length && <p className="tab-note">Showing the {formatCount(report.sets.length)} sets that waste the most space.</p>}
               </>
             )}
           </>

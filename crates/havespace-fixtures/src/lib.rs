@@ -56,6 +56,16 @@ impl Fixture {
         Ok(p)
     }
 
+    /// File with exactly these contents.
+    pub fn write(&self, rel: &str, contents: &[u8]) -> io::Result<PathBuf> {
+        let p = self.path(rel);
+        if let Some(parent) = p.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&p, contents)?;
+        Ok(p)
+    }
+
     pub fn hard_link(&self, existing: &str, new: &str) -> io::Result<PathBuf> {
         let p = self.path(new);
         if let Some(parent) = p.parent() {

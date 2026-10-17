@@ -6,7 +6,7 @@ import { FAKE_DRIVES, FAKE_ROOT, makeStressTree, pathOf } from "../data/fakeTree
 import { categoryTotals, extensionTotals, findHogs, largestFiles } from "../data/insights";
 import type { TreeNode } from "../data/types";
 import { layoutTreemap } from "../treemap/layout";
-import { BF_AGGREGATE, BF_DIR, type Backend, type Change, type Layout, type Protection, type Row, type ScanChanges, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
+import { BF_AGGREGATE, BF_DIR, type AgeSummary, type Backend, type Change, type DupeProgress, type DupeReport, type Layout, type Protection, type Ranked, type Row, type ScanChanges, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
 
 const params = new URLSearchParams(location.search);
 const ROOT: TreeNode = params.get("stress") ? makeStressTree(Number(params.get("stress"))) : FAKE_ROOT;
@@ -24,7 +24,94 @@ const listeners = {
   progress: new Set<(p: ScanProgress) => void>(),
   done: new Set<(s: ScanSummary) => void>(),
   summary: new Set<(s: ScanSummary) => void>(),
+  dupesProgress: new Set<(p: DupeProgress) => void>(),
+  dupesDone: new Set<(r: DupeReport) => void>(),
 };
+
+const DAY_MS = 86_400_000;
+/** Fake folders' mtime is already the newest file inside them. */
+const daysOf = (n: TreeNode) => (n.mtime > 0 ? Math.floor(n.mtime / DAY_MS) : 0);
+
+function allFiles(n: TreeNode, out: TreeNode[] = []): TreeNode[] {
+  if (!n.isDir) out.push(n);
+  else n.children.forEach((c) => allFiles(c, out));
+  return out;
+}
+
+const ranked = (n: TreeNode, size = n.size): Ranked => ({ node: idOf(n), path: pathOf(n), size, alloc: n.onDisk, files: n.files });
+
+/** Same bands and stale rule as `age_summary` in analysis.rs. */
+function mockAge(): AgeSummary {
+  const bandsDays = [0, 30, 182, 365, 730, 1826];
+  const bands = bandsDays.map((minDays) => ({ minDays, size: 0, files: 0 }));
+  const today = Math.floor(Date.now() / DAY_MS);
+  const stale: TreeNode[] = [];
+  const ownStale = new Map<TreeNode, number>();
+  for (const f of allFiles(ROOT)) {
+    const age = today - daysOf(f);
+    let i = 0;
+    while (i + 1 < bandsDays.length && age >= bandsDays[i + 1]) i++;
+    bands[i].size += f.size;
+    bands[i].files++;
+    if (age >= 730) {
+      stale.push(f);
+      if (f.parent) ownStale.set(f.parent, (ownStale.get(f.parent) ?? 0) + f.size);
+    }
+  }
+  return {
+    bands,
+    unknownSize: 0,
+    unknownFiles: 0,
+    staleDays: 730,
+    staleSize: stale.reduce((s, f) => s + f.size, 0),
+    staleFiles: stale.length,
+    staleLargest: stale.sort((a, b) => b.size - a.size).slice(0, 50).map((f) => ranked(f)),
+    staleFolders: [...ownStale].sort((a, b) => b[1] - a[1]).slice(0, 50).map(([n, size]) => ranked(n, size)),
+  };
+}
+
+/**
+ * Plausible duplicate sets over the fake tree (it has no real duplicates): big media, archives and
+ * installers paired up across folders. Demo only; "copies" can differ slightly in size.
+ */
+function mockDupes(rootId: number, minSize: number): DupeReport {
+  const root = byId.get(rootId) ?? ROOT;
+  const files = allFiles(root).filter((f) => f.size >= minSize && ["video", "archive", "image", "executable"].includes(f.category));
+  files.sort((a, b) => b.size - a.size);
+  const sets: DupeReport["sets"] = [];
+  const used = new Set<TreeNode>();
+  for (const f of files.slice(0, 120)) {
+    if (used.has(f) || sets.length >= 14) continue;
+    const mates = files.filter((g) => !used.has(g) && g !== f && g.category === f.category && g.parent !== f.parent).slice(0, sets.length % 3 === 0 ? 2 : 1);
+    if (!mates.length) continue;
+    const group = [f, ...mates];
+    group.forEach((g) => used.add(g));
+    sets.push({ size: f.size, files: group.map((g) => ({ node: idOf(g), path: pathOf(g), mtimeMs: g.mtime })).sort((a, b) => a.path.localeCompare(b.path)) });
+  }
+  sets.sort((a, b) => b.size * (b.files.length - 1) - a.size * (a.files.length - 1));
+  return {
+    generation,
+    root: rootId,
+    rootPath: pathOf(root),
+    minSize,
+    sets,
+    totalSets: sets.length,
+    wasted: sets.reduce((s, x) => s + x.size * (x.files.length - 1), 0),
+    extraCopies: sets.reduce((s, x) => s + x.files.length - 1, 0),
+    candidates: files.length,
+    bytesRead: files.reduce((s, f) => s + f.size, 0),
+    skippedCloud: 0,
+    unreadable: 0,
+    cancelled: false,
+    elapsedMs: 1400,
+  };
+}
+
+let dupes: DupeReport | null = null;
+let mockSettings = { explorerMenu: false, tray: false, startWithWindows: false, lowDiskPercent: 10 };
+/** Ids of nodes "sent to the Recycle Bin" in the demo. */
+const removed = new Set<number>();
+let dupeTimer: number | undefined;
 let timer: number | undefined;
 
 function catId(c: string) {
@@ -118,6 +205,7 @@ function summary(): ScanSummary {
       count: 1,
       items: [{ node: idOf(h.node), path: pathOf(h.node), size: h.node.size }],
     })),
+    age: mockAge(),
     changes: mockChanges(),
   };
 }
@@ -138,6 +226,10 @@ function mockProtection(path: string): Protection {
 function removeNode(n: TreeNode) {
   const p = n.parent;
   if (!p) return;
+  (function forget(x: TreeNode) {
+    removed.add(idOf(x));
+    x.children.forEach(forget);
+  })(n);
   p.children = p.children.filter((c) => c !== n);
   for (let a: TreeNode | null = p; a; a = a.parent) {
     a.size -= n.size;
@@ -198,6 +290,7 @@ export const mockBackend: Backend = {
           depth: b.depth,
           category: b.isAggregate ? "other" : b.node.isDir ? (b.expanded ? "folder" : b.node.dominant) : b.node.category,
           flags: (b.isAggregate ? BF_AGGREGATE : 0) | (!b.isAggregate && b.node.isDir ? BF_DIR : 0),
+          newestDays: daysOf(b.node),
         }),
       ),
     };
@@ -250,7 +343,7 @@ export const mockBackend: Backend = {
   },
   findPath: async (_g, path) => mockFindId(path.replace(/^C:\\/i, "").split("\\").join("/")) ?? null,
   pickFolder: async () => "C:\\Users\\Alex",
-  launchOptions: async () => ({ scan: params.has("picker") ? null : "C:\\", focus: null, theme: null }),
+  launchOptions: async () => ({ scan: params.has("picker") ? null : "C:\\", saved: false, focus: null, theme: null }),
   onProgress: (cb) => (listeners.progress.add(cb), () => listeners.progress.delete(cb)),
   onDone: (cb) => (listeners.done.add(cb), () => listeners.done.delete(cb)),
   onError: () => () => {},
@@ -302,6 +395,50 @@ export const mockBackend: Backend = {
   exportTree: async () => {
     throw new Error("Exporting needs the desktop app.");
   },
+  startDuplicates: async (g, root, minSize) => {
+    clearInterval(dupeTimer);
+    const report = mockDupes(root, minSize);
+    const start = performance.now();
+    dupeTimer = window.setInterval(() => {
+      const t = params.has("instant") ? 1 : Math.min(1, (performance.now() - start) / 1400);
+      const p: DupeProgress = {
+        generation: g,
+        phase: t < 0.4 ? 1 : 2,
+        filesDone: Math.round(report.candidates * t),
+        filesTotal: report.candidates,
+        bytesDone: Math.round(report.bytesRead * t),
+        bytesTotal: report.bytesRead,
+      };
+      listeners.dupesProgress.forEach((cb) => cb(p));
+      if (t >= 1) {
+        clearInterval(dupeTimer);
+        dupes = { ...report, generation: g };
+        listeners.dupesDone.forEach((cb) => cb(dupes!));
+      }
+    }, 120);
+  },
+  cancelDuplicates: async () => {
+    clearInterval(dupeTimer);
+    dupes = { ...mockDupes(0, Infinity), cancelled: true };
+    listeners.dupesDone.forEach((cb) => cb(dupes!));
+  },
+  duplicates: async () => {
+    if (!dupes) return null;
+    const sets = dupes.sets.map((s) => ({ ...s, files: s.files.filter((f) => !removed.has(f.node)) })).filter((s) => s.files.length > 1);
+    return { ...dupes, sets, totalSets: sets.length, wasted: sets.reduce((a, s) => a + s.size * (s.files.length - 1), 0), extraCopies: sets.reduce((a, s) => a + s.files.length - 1, 0) };
+  },
+  onDupesProgress: (cb) => (listeners.dupesProgress.add(cb), () => listeners.dupesProgress.delete(cb)),
+  onDupesDone: (cb) => (listeners.dupesDone.add(cb), () => listeners.dupesDone.delete(cb)),
+  getIntegration: async () => ({ settings: mockSettings, trayActive: false, trayElsewhere: false }),
+  setIntegration: async (s) => {
+    // Demo: remembered for this page only; nothing touches Windows.
+    mockSettings = { ...s, startWithWindows: s.tray && s.startWithWindows };
+    return { settings: mockSettings, trayActive: false, trayElsewhere: false };
+  },
+  testNotification: async () => {
+    throw new Error("Notifications need the desktop app.");
+  },
+  onOpenPath: () => () => {},
   setBackdrop: async () => {},
   windowControl: async () => {},
 };

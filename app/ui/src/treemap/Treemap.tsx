@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { BF_AGGREGATE, BF_DIR, BF_PENDING, type Layout, type ViewBlock } from "../api";
+import { ageColor, todayDays } from "../data/age";
 import { CATEGORY_COLORS } from "../data/categories";
 import { formatBytes, formatCount } from "../data/format";
 import { FLAG_AGGREGATE, FLAG_DIR, FLAG_LEAF, FLAG_OVERLAY, FLAG_PENDING, FLAG_SELECTED, INSTANCE_FLOATS } from "./glRenderer";
@@ -12,9 +13,13 @@ export interface HoverInfo {
   clientY: number;
 }
 
+/** What the tile colours mean: file type, or how long ago the data inside was last modified. */
+export type ColorMode = "type" | "age";
+
 interface Props {
   layout: Layout | null;
   theme: "dark" | "light";
+  colorMode: ColorMode;
   reduceMotion: boolean;
   onHover: (h: HoverInfo | null) => void;
   /** Click on a block; `top` is the top-level block under the cursor (the zoom target). */
@@ -30,6 +35,8 @@ interface Props {
 }
 
 const ZOOM_MS = 300;
+/** Age bands are told apart by hue alone, so their tiles carry more tint (see BLOCK_FS). */
+export const AGE_TINT_BOOST = 1.8;
 const REFRESH_MS = 240;
 const HOVER_MS = 140;
 
@@ -61,9 +68,14 @@ function blockFlags(b: ViewBlock): number {
   return f;
 }
 
-function writeInstance(out: Float32Array, i: number, b: ViewBlock, x: number, y: number, w: number, h: number, alpha: number, flags: number) {
+/** Tile tint. In age mode, expanded folders keep the neutral folder glass so their contents stand out. */
+function tint(b: ViewBlock, mode: ColorMode, today: number): [number, number, number] {
+  if (mode === "age" && !(b.flags & BF_DIR && b.header > 0 && !(b.flags & BF_AGGREGATE))) return ageColor(b.newestDays, today);
+  return CATEGORY_COLORS[b.category];
+}
+
+function writeInstance(out: Float32Array, i: number, b: ViewBlock, x: number, y: number, w: number, h: number, alpha: number, flags: number, c: [number, number, number]) {
   const o = i * INSTANCE_FLOATS;
-  const c = CATEGORY_COLORS[b.category];
   out[o] = x;
   out[o + 1] = y;
   out[o + 2] = w;
@@ -91,7 +103,7 @@ function findInChain(blocks: ViewBlock[], chain: number[] | undefined): number {
   return -1;
 }
 
-export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onResize, onContextMenu, selectedChain, linkedHoverNode, demoHoverNode }: Props) {
+export function Treemap({ layout, theme, colorMode, reduceMotion, onHover, onActivate, onResize, onContextMenu, selectedChain, linkedHoverNode, demoHoverNode }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
@@ -109,6 +121,7 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
     pending: false,
     selected: -1,
     mouseInside: false,
+    colorMode,
   });
   const cb = useRef({ onHover, onActivate, onResize, onContextMenu });
   cb.current = { onHover, onActivate, onResize, onContextMenu };
@@ -190,6 +203,11 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
     stage.reduceMotion = reduceMotion;
   }, [reduceMotion]);
 
+  useEffect(() => {
+    state.current.colorMode = colorMode;
+    state.current.dirty = state.current.labelsDirty = true;
+  }, [colorMode]);
+
   // Per frame: rebuild instances while animating; redraw labels when settled.
   useEffect(() => {
     const s = state.current;
@@ -197,6 +215,7 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
       const r = stage.renderer;
       if (!r) return;
       r.theme = s.theme === "light" ? 1 : 0;
+      r.tintBoost = s.colorMode === "age" ? AGE_TINT_BOOST : 1;
 
       const targetHover = s.hovered >= 0 ? 1 : 0;
       if (s.hoverT !== targetHover) {
@@ -228,32 +247,35 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
       const buf = s.buf;
       let n = 0;
       const e = easeInOutCubic(t);
+      const mode = s.colorMode;
+      const today = todayDays();
+      const put = (b: ViewBlock, x: number, y: number, w: number, h: number, alpha: number, flags: number) => writeInstance(buf, n++, b, x, y, w, h, alpha, flags, tint(b, mode, today));
       if (anim) {
         const a = anim.outFrom;
         const z = anim.outTo;
         for (let i = 0; i < anim.outgoing.length; i++) {
           const o = i * 4;
           const b = anim.outgoing[i];
-          writeInstance(buf, n++, b, a[o] + (z[o] - a[o]) * e, a[o + 1] + (z[o + 1] - a[o + 1]) * e, a[o + 2] + (z[o + 2] - a[o + 2]) * e, a[o + 3] + (z[o + 3] - a[o + 3]) * e, 1 - e, blockFlags(b));
+          put(b, a[o] + (z[o] - a[o]) * e, a[o + 1] + (z[o + 1] - a[o + 1]) * e, a[o + 2] + (z[o + 2] - a[o + 2]) * e, a[o + 3] + (z[o + 3] - a[o + 3]) * e, 1 - e, blockFlags(b));
         }
         const f = anim.from;
         for (let i = 0; i < blocks.length; i++) {
           const b = blocks[i];
           const o = i * 5;
-          writeInstance(buf, n++, b, f[o] + (b.x - f[o]) * e, f[o + 1] + (b.y - f[o + 1]) * e, f[o + 2] + (b.w - f[o + 2]) * e, f[o + 3] + (b.h - f[o + 3]) * e, f[o + 4] + (1 - f[o + 4]) * e, blockFlags(b));
+          put(b, f[o] + (b.x - f[o]) * e, f[o + 1] + (b.y - f[o + 1]) * e, f[o + 2] + (b.w - f[o + 2]) * e, f[o + 3] + (b.h - f[o + 3]) * e, f[o + 4] + (1 - f[o + 4]) * e, blockFlags(b));
         }
       } else {
         for (let i = 0; i < blocks.length; i++) {
           const b = blocks[i];
-          writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, blockFlags(b));
+          put(b, b.x, b.y, b.w, b.h, 1, blockFlags(b));
         }
         if (s.hovered >= 0 && s.hoverT > 0 && blocks[s.hovered]) {
           const b = blocks[s.hovered];
-          writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, blockFlags(b) | FLAG_OVERLAY);
+          put(b, b.x, b.y, b.w, b.h, 1, blockFlags(b) | FLAG_OVERLAY);
         }
         if (s.selected >= 0 && blocks[s.selected]) {
           const b = blocks[s.selected];
-          writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, FLAG_SELECTED);
+          put(b, b.x, b.y, b.w, b.h, 1, FLAG_SELECTED);
         }
       }
       r.setInstances(buf, n);
@@ -267,14 +289,14 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
         if (anim && !zooming) {
           // Streamed refresh: labels ride along with their gliding tiles.
           const f = anim.from;
-          drawLabels(lc, blocks, s.size.w, s.size.h, s.theme, (i, b) => {
+          drawLabels(lc, blocks, s.size.w, s.size.h, s.theme, s.colorMode, (i, b) => {
             const o = i * 5;
             return [f[o] + (b.x - f[o]) * e, f[o + 1] + (b.y - f[o + 1]) * e, f[o + 2] + (b.w - f[o + 2]) * e, f[o + 3] + (b.h - f[o + 3]) * e];
           });
           s.labelsDirty = true;
         } else if (!anim && s.labelsDirty) {
           s.labelsDirty = false;
-          drawLabels(lc, blocks, s.size.w, s.size.h, s.theme);
+          drawLabels(lc, blocks, s.size.w, s.size.h, s.theme, s.colorMode);
         }
       }
     });
@@ -397,6 +419,8 @@ function buildMorph(prev: ViewBlock[], prevRoot: number, next: ViewBlock[], next
 
 /** Frosted dark backing for dark-theme labels (keep in sync with scripts/contrast-audit.mjs). */
 const LABEL_PILL = "rgba(8, 10, 24, 0.55)";
+/** Age tiles carry more tint (AGE_TINT_BOOST), so their label pills are denser to keep AA contrast. */
+const LABEL_PILL_AGE = "rgba(8, 10, 24, 0.64)";
 
 const FONT_STACK = `"Segoe UI Variable Text", "Segoe UI Variable", "Inter", "Segoe UI", system-ui, sans-serif`;
 
@@ -416,7 +440,7 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxW: number): str
 type RectOf = (i: number, b: ViewBlock) => [number, number, number, number];
 const finalRect: RectOf = (_i, b) => [b.x, b.y, b.w, b.h];
 
-function drawLabels(canvas: HTMLCanvasElement, blocks: ViewBlock[], w: number, h: number, theme: "dark" | "light", rectOf: RectOf = finalRect) {
+function drawLabels(canvas: HTMLCanvasElement, blocks: ViewBlock[], w: number, h: number, theme: "dark" | "light", mode: ColorMode, rectOf: RectOf = finalRect) {
   const dpr = window.devicePixelRatio || 1;
   const cw = Math.round(w * dpr);
   const ch = Math.round(h * dpr);
@@ -446,7 +470,7 @@ function drawLabels(canvas: HTMLCanvasElement, blocks: ViewBlock[], w: number, h
       const tw = ctx.measureText(text).width;
       const left = align === "right" ? x - tw : x;
       ctx.shadowBlur = 0;
-      ctx.fillStyle = LABEL_PILL;
+      ctx.fillStyle = mode === "age" ? LABEL_PILL_AGE : LABEL_PILL;
       ctx.beginPath();
       ctx.roundRect(left - 4, cy - fontPx / 2 - 2.5, tw + 8, fontPx + 5, 5);
       ctx.fill();

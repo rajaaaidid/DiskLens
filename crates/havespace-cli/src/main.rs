@@ -3,6 +3,7 @@
 //!   havespace scan C:\ --top 20 [--method auto|walk|findfirst|mft] [--threads N] [--json]
 //!   havespace bench C:\ --runs 3 [--method walk]
 //!   havespace diff C:\ [--top 20] [--save] [--against old.dlc] [--json]
+//!   havespace dupes D:\Photos [--min-size 1048576] [--top 20] [--json]
 //!   havespace fixture D:\tmp\fake --files 1000000 --depth 12
 
 use std::path::PathBuf;
@@ -92,6 +93,25 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Scan, then find files with identical contents (reads every file that shares its size with
+    /// another one).
+    Dupes {
+        path: PathBuf,
+        /// Ignore files smaller than this many bytes.
+        #[arg(long, default_value_t = 1024 * 1024)]
+        min_size: u64,
+        /// How many duplicate sets to list.
+        #[arg(long, default_value_t = 20)]
+        top: usize,
+        /// Parallel file readers.
+        #[arg(long, default_value_t = 4)]
+        readers: usize,
+        #[arg(long, default_value = "auto")]
+        method: Method,
+        /// Print machine-readable JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate a fake directory tree for testing and benchmarks.
     Fixture {
         path: PathBuf,
@@ -115,6 +135,7 @@ fn main() {
         Cmd::Compare { path } => run_compare(path),
         Cmd::Export { path, format, out, folders_only, depth, method } => run_export(path, format, out, folders_only, depth, method),
         Cmd::Diff { path, top, against, save, method, json } => run_diff(path, top, against, save, method, json),
+        Cmd::Dupes { path, min_size, top, readers, method, json } => run_dupes(path, min_size, top, readers, method, json),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
             match havespace_fixtures::generate(&path, files, depth, max_file, seed) {
@@ -337,6 +358,52 @@ fn run_export(path: PathBuf, format: havespace_core::export::Format, out: Option
             1
         }
     }
+}
+
+fn run_dupes(path: PathBuf, min_size: u64, top: usize, readers: usize, method: Method, json: bool) -> i32 {
+    use havespace_core::dupes::{candidates, find, DupeProgress};
+    let progress = Progress::default();
+    let res = match scan(&ScanOptions { root: path, method, threads: 0 }, &progress, None) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("scan failed: {e}");
+            return 1;
+        }
+    };
+    let c = candidates(&res.tree.read().unwrap(), 0, min_size);
+    let dp = Arc::new(DupeProgress::default());
+    {
+        let dp = dp.clone();
+        ctrlc_cancel(move || dp.cancel());
+    }
+    let report = find(c, readers, &dp);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        return 0;
+    }
+    println!(
+        "{} duplicate sets, {} extra copies, {} could be freed  ({} candidates, {} read in {:.1} s)",
+        report.sets.len(),
+        report.extra_copies,
+        format_bytes(report.wasted),
+        report.candidates,
+        format_bytes(report.bytes_read),
+        report.elapsed_ms as f64 / 1000.0
+    );
+    if report.cancelled {
+        println!("cancelled: only part of the files were compared");
+    }
+    if report.unreadable > 0 || report.skipped_cloud > 0 {
+        println!("skipped: {} unreadable, {} online-only", report.unreadable, report.skipped_cloud);
+    }
+    for (k, s) in report.sets.iter().take(top).enumerate() {
+        println!("
+  {:>3}. {} × {}  ({} wasted)", k + 1, s.files.len(), format_bytes(s.size), format_bytes(s.wasted()));
+        for f in &s.files {
+            println!("         {}", f.path);
+        }
+    }
+    0
 }
 
 fn run_diff(path: PathBuf, top: usize, against: Option<PathBuf>, save: bool, method: Method, json: bool) -> i32 {

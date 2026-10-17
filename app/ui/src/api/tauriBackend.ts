@@ -5,7 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { CATEGORY_BY_ID } from "../data/categories";
 import { BF_AGGREGATE, type Backend, type Layout, type ViewBlock } from "./types";
 
-const BLOCK_BYTES = 48;
+const BLOCK_BYTES = 56;
 const decoder = new TextDecoder();
 
 /** Decode the binary layout payload described in `src-tauri/src/encode.rs`. */
@@ -38,6 +38,7 @@ export function decodeLayout(buf: ArrayBuffer): Layout {
       category: CATEGORY_BY_ID[v.getUint8(o + 42)] ?? "other",
       flags,
       files: v.getUint32(o + 44, true),
+      newestDays: v.getUint32(o + 48, true),
       name: names[i] ?? "",
     };
   }
@@ -89,6 +90,15 @@ export const tauriBackend: Backend = {
       foldersOnly: kind !== "csv-all",
       maxDepth: kind === "json-tree" ? 6 : null,
     }),
+  startDuplicates: (generation, root, minSize) => invoke("start_duplicates", { generation, root, minSize }),
+  cancelDuplicates: () => invoke("cancel_duplicates"),
+  duplicates: (generation) => invoke("duplicates", { generation }),
+  onDupesProgress: (cb) => subscribe("dupes-progress", cb),
+  onDupesDone: (cb) => subscribe("dupes-done", cb),
+  getIntegration: () => invoke("get_integration"),
+  setIntegration: (settings) => invoke("set_integration", { settings }),
+  testNotification: () => invoke("test_notification"),
+  onOpenPath: (cb) => subscribe("open-path", cb),
   setBackdrop: (dark) => invoke("set_backdrop", { dark }),
   windowControl: async (action) => {
     const w = getCurrentWindow();

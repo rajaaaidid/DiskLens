@@ -435,6 +435,8 @@ button {
   padding: 0 8px 0 10px;
   border-radius: 14px;
   gap: 12px;
+  /* A long folder path must shrink the breadcrumbs, not widen the column. */
+  min-width: 0;
 }
 .breadcrumbs {
   display: flex;
@@ -446,16 +448,31 @@ button {
 .crumb-wrap {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+}
+.crumb-wrap:last-of-type {
+  flex-shrink: 1;
+}
+.crumb-wrap:not(:last-of-type) {
+  flex-shrink: 0;
 }
 .crumb {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding: 5px 8px;
   border-radius: 8px;
   color: var(--text-2);
   font-weight: 500;
   transition: background 0.15s, color 0.15s;
+}
+.crumb-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .crumb:hover {
   background: var(--glass-hover);
@@ -1625,4 +1642,261 @@ input:disabled {
 .file-rank li.gone .file-name {
   text-decoration: line-through;
   text-decoration-color: var(--text-3);
+}
+
+/* ---------- age colours ---------- */
+.age-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  max-width: calc(100% - 20px);
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  pointer-events: none;
+}
+.age-legend-title {
+  color: var(--text);
+  font-weight: 650;
+}
+.age-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.age-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 6px 4px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.stale-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--inset);
+  border: 1px solid var(--hairline);
+}
+.stale-size {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- duplicates ---------- */
+.dupe-start,
+.dupe-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--inset);
+  border: 1px solid var(--hairline);
+}
+.dupe-start .tab-note,
+.dupe-progress p {
+  margin: 0;
+}
+.dupe-start .tab-note b {
+  color: var(--text-2);
+  font-weight: 600;
+  word-break: break-all;
+}
+.dupe-progress .btn {
+  align-self: flex-start;
+}
+.dupe-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.dupe-controls select {
+  margin-left: 4px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  color: var(--text);
+  font: inherit;
+}
+.dupe-controls .btn {
+  padding: 6px 12px;
+}
+.dupe-card header {
+  align-items: baseline;
+}
+.dupe-copies {
+  font-weight: 600;
+  font-size: 13px;
+}
+.dupe-date {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.change-stats:has(> div:nth-child(2):last-child) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ---------- keep one copy ---------- */
+.modal.keep-one {
+  width: min(560px, calc(100vw - 32px));
+}
+.keep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 10px 0;
+}
+.keep-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--inset);
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.keep-row.kept {
+  border-color: var(--accent);
+}
+.keep-row input {
+  margin-top: 3px;
+  accent-color: #7c3aed;
+}
+.keep-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.keep-main .confirm-path {
+  word-break: break-all;
+}
+.keep-meta {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+/* ---------- settings ---------- */
+.modal.settings {
+  width: min(520px, calc(100vw - 32px));
+  text-align: left;
+}
+.modal.settings .section-label {
+  margin-top: 16px;
+}
+.setting {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.setting.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.setting-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  cursor: default;
+}
+.setting-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.setting-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+.setting-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: 0 4px;
+}
+.setting .setting-hint {
+  margin: 0;
+}
+.setting select {
+  padding: 4px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--hairline);
+  background: var(--glass-strong);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+.switch {
+  appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 1px 0 0;
+  border-radius: 99px;
+  background: var(--inset);
+  /* Non-text contrast (3:1): the track's outline uses the secondary-text colour. */
+  border: 1.5px solid var(--text-3);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 1.5px;
+  left: 1.5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-2);
+  transition: transform 0.15s, background 0.15s;
+}
+.switch:checked {
+  background: var(--accent-grad);
+  border-color: transparent;
+}
+.switch:checked::after {
+  transform: translateX(14px);
+  background: #fff;
+}
+.switch:disabled {
+  cursor: default;
+}
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.settings-actions {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
 }

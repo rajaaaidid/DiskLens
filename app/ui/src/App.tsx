@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { backend, BF_AGGREGATE, BF_DIR, type ActionInfo, type CacheEntry, type Crumb, type Drive, type ExportKind, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
+import { backend, BF_AGGREGATE, BF_DIR, type ActionInfo, type CacheEntry, type Crumb, type DupeProgress, type DupeReport, type DupeSet, type Drive, type ExportKind, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
+import { AgeLegend } from "./components/AgeLegend";
 import { ExportMenu } from "./components/ExportMenu";
+import { KeepOneDialog } from "./components/KeepOneDialog";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { mockFindId } from "./api/mockBackend";
 import { ConfirmRecycle } from "./components/ConfirmRecycle";
 import { ContextMenu, type MenuTarget } from "./components/ContextMenu";
@@ -14,7 +17,7 @@ import { Tooltip } from "./components/Tooltip";
 import { TreeList } from "./components/TreeList";
 import { formatBytes } from "./data/format";
 import { stage } from "./treemap/stage";
-import { Treemap, type HoverInfo } from "./treemap/Treemap";
+import { Treemap, type ColorMode, type HoverInfo } from "./treemap/Treemap";
 
 const params = new URLSearchParams(location.search);
 /** While scanning, refresh the streamed treemap at most this often. */
@@ -83,6 +86,27 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [demoHover, setDemoHover] = useState<number | undefined>();
   const [fps, setFps] = useState(0);
+  const [colorMode, setColorModeState] = useState<ColorMode>(() => {
+    if (params.get("color") === "age") return "age";
+    try {
+      return localStorage.getItem("havespace.colorMode") === "age" ? "age" : "type";
+    } catch {
+      return "type";
+    }
+  });
+  const setColorMode = useCallback((m: ColorMode) => {
+    setColorModeState(m);
+    try {
+      localStorage.setItem("havespace.colorMode", m);
+    } catch {
+      /* private mode: just don't remember it */
+    }
+  }, []);
+  const [dupeReport, setDupeReport] = useState<DupeReport | null>(null);
+  const [dupeProgress, setDupeProgress] = useState<DupeProgress | null>(null);
+  const [dupesRunning, setDupesRunning] = useState(false);
+  const [keepOne, setKeepOne] = useState<DupeSet | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(params.has("settings"));
 
   const toast = useCallback((kind: Toast["kind"], text: string, detail?: string) => {
     const id = Date.now() + Math.random();
@@ -143,6 +167,9 @@ export default function App() {
     setLayout(null);
     setRootId(0);
     setSelected(undefined);
+    setDupeReport(null);
+    setDupeProgress(null);
+    setDupesRunning(false);
     (fromCache ? backend.openCache(path) : backend.startScan(path))
       .then((g) => {
         if (g < genRef.current) return; // an older request resolving late
@@ -190,13 +217,30 @@ export default function App() {
       else if (e.generation > genRef.current) early.current.error = e;
     });
     const offS = backend.onSummaryUpdated((s) => {
-      if (s.generation === genRef.current) setSummary(s);
+      if (s.generation !== genRef.current) return;
+      setSummary(s);
+      // Items were recycled: drop them from the duplicate sets too.
+      backend
+        .duplicates(s.generation)
+        .then((r) => s.generation === genRef.current && setDupeReport(r))
+        .catch(() => {});
+    });
+    const offDP = backend.onDupesProgress((p) => {
+      if (p.generation === genRef.current) setDupeProgress(p);
+    });
+    const offDD = backend.onDupesDone((r) => {
+      if (r.generation !== genRef.current) return;
+      setDupeReport(r);
+      setDupesRunning(false);
+      setDupeProgress(null);
     });
     return () => {
       offP();
       offD();
       offE();
       offS();
+      offDP();
+      offDD();
     };
   }, [applyDone, applyError]);
 
@@ -209,9 +253,12 @@ export default function App() {
     backend.launchOptions().then((o) => {
       if (o.theme) setTheme(o.theme);
       focusAfterScan.current = o.focus;
-      if (o.scan) startScan(o.scan);
+      if (o.scan) begin(o.scan, o.saved);
     });
-  }, [startScan]);
+  }, [begin]);
+
+  // A low-disk notification was clicked.
+  useEffect(() => backend.onOpenPath((p) => begin(p.path, p.saved)), [begin]);
 
   // --- layout fetching (one request in flight; coalesce the rest) --------------------------------
   const want = useRef({ generation, rootId, size, useAlloc, tick });
@@ -353,6 +400,40 @@ export default function App() {
     [generation, toast, selected, selectedChain, crumbs, zoomTo],
   );
 
+  const findDupes = useCallback(
+    (minSize: number) => {
+      setDupesRunning(true);
+      setDupeProgress(null);
+      backend.startDuplicates(generation, rootId, minSize).catch((e) => {
+        setDupesRunning(false);
+        toast("error", "Couldn't look for duplicates", String(e));
+      });
+    },
+    [generation, rootId, toast],
+  );
+
+  /** Recycle the copies the user chose in the "Keep one copy" dialog. */
+  const recycleCopies = useCallback(
+    async (ids: number[], keptName: string) => {
+      try {
+        const r = await backend.recycle(generation, ids);
+        if (r.recycled.length) {
+          toast("ok", `Kept “${keptName}”, moved ${r.recycled.length} ${r.recycled.length === 1 ? "copy" : "copies"} to the Recycle Bin`, `${formatBytes(r.freed)} freed`);
+          if (selected !== undefined && r.recycled.includes(selected)) setSelected(undefined);
+          setTick((t) => t + 1);
+          backend.listDrives().then(setDrives);
+        }
+        for (const [path, why] of r.failed) toast("error", `Not moved: ${path.split("\\").pop()}`, why);
+        for (const path of r.permanentlyDeleted) toast("error", "Windows deleted an item permanently", path);
+      } catch (e) {
+        toast("error", "Couldn't send to the Recycle Bin", String(e));
+      } finally {
+        setKeepOne(null);
+      }
+    },
+    [generation, toast, selected],
+  );
+
   const openMenu = useCallback((id: number, name: string, isDir: boolean, x: number, y: number) => {
     setHover(null);
     setSelected(id);
@@ -363,7 +444,7 @@ export default function App() {
   // dialog), Ctrl+C copies its path.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === "INPUT" || menu || confirm) return;
+      if (["INPUT", "SELECT"].includes((e.target as HTMLElement).tagName) || menu || confirm || keepOne || settingsOpen) return;
       if (e.key === "Backspace" || e.key === "Escape") zoomOut();
       else if (selected !== undefined && e.key === "Delete") askRecycle(selected);
       else if (selected !== undefined && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) copyPath(selected);
@@ -372,7 +453,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [zoomOut, selected, menu, confirm, askRecycle, copyPath, generation, zoomTo]);
+  }, [zoomOut, selected, menu, confirm, keepOne, settingsOpen, askRecycle, copyPath, generation, zoomTo]);
 
   useEffect(() => {
     if (!summary || !focusAfterScan.current) return;
@@ -417,6 +498,7 @@ export default function App() {
         <TitleBar
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+          onOpenSettings={() => setSettingsOpen(true)}
           subtitle={target ? `${target} · ${formatBytes(summary?.size ?? progress?.bytes ?? 0)}${scanning ? " scanned so far" : ""}` : ""}
           notice={
             backend.native || params.has("shots") ? undefined : (
@@ -457,20 +539,23 @@ export default function App() {
                   {crumbs.map((c, i) => (
                     <span key={c.id} className="crumb-wrap">
                       {i > 0 && <span className="crumb-sep">›</span>}
-                      <button className={`crumb ${i === crumbs.length - 1 ? "current" : ""}`} onClick={() => zoomTo(c.id)}>
-                        {i === 0 ? (
-                          <>
-                            <IconHome /> {c.name.replace(/\\$/, "")}
-                          </>
-                        ) : (
-                          c.name
-                        )}
+                      <button className={`crumb ${i === crumbs.length - 1 ? "current" : ""}`} onClick={() => zoomTo(c.id)} title={c.name}>
+                        {i === 0 && <IconHome />}
+                        <span className="crumb-text">{i === 0 ? c.name.replace(/\\$/, "") : c.name}</span>
                       </button>
                     </span>
                   ))}
                   {crumbs.length > 0 && <span className="crumb-size">{formatBytes(rootSize)}</span>}
                 </nav>
                 <div className="toolbar-right">
+                  <div className="segmented small" role="group" aria-label="Colour tiles by">
+                    <button className={colorMode === "type" ? "on" : ""} onClick={() => setColorMode("type")} title="Colour tiles by file type">
+                      Type
+                    </button>
+                    <button className={colorMode === "age" ? "on" : ""} onClick={() => setColorMode("age")} title="Colour tiles by when the files inside were last modified">
+                      Age
+                    </button>
+                  </div>
                   <div className="segmented small">
                     <button className={!useAlloc ? "on" : ""} onClick={() => setUseAlloc(false)}>
                       Size
@@ -489,6 +574,7 @@ export default function App() {
                 <Treemap
                   layout={layout}
                   theme={theme}
+                  colorMode={colorMode}
                   reduceMotion={reduceMotion}
                   onHover={setHover}
                   onActivate={onActivate}
@@ -502,6 +588,7 @@ export default function App() {
                   linkedHoverNode={rowHover}
                   demoHoverNode={demoHover}
                 />
+                {colorMode === "age" && layout && layout.blocks.length > 0 && <AgeLegend />}
                 {scanning && !layout?.blocks.length && <div className="treemap-empty">Reading {target}…</div>}
                 {error && <div className="treemap-empty error">Scan failed: {error}</div>}
                 {params.has("fps") && (
@@ -527,11 +614,20 @@ export default function App() {
                 />
               )}
             </main>
-            <InsightsPanel summary={summary} scanning={scanning} onReveal={showPath} onOpenInExplorer={revealInExplorer} onItemMenu={openMenu} />
+            <InsightsPanel
+              summary={summary}
+              scanning={scanning}
+              colorMode={colorMode}
+              onColorMode={setColorMode}
+              dupes={{ report: dupeReport, progress: dupeProgress, running: dupesRunning, scopePath: crumbs.length ? crumbs.map((c) => c.name).join("\\").replace(/\\\\+/g, "\\") : (target ?? "") }}
+              onFindDupes={findDupes}
+              onCancelDupes={() => backend.cancelDuplicates()}
+              onKeepOne={setKeepOne}
+              onReveal={showPath} onOpenInExplorer={revealInExplorer} onItemMenu={openMenu} />
           </div>
         )}
       </div>
-      {!menu && !confirm && <Tooltip hover={hover} generation={generation} useAlloc={useAlloc} />}
+      {!menu && !confirm && !keepOne && <Tooltip hover={hover} generation={generation} useAlloc={useAlloc} />}
       {menu && (
         <ContextMenu
           target={menu}
@@ -544,6 +640,8 @@ export default function App() {
         />
       )}
       {confirm && <ConfirmRecycle info={confirm} onCancel={() => setConfirm(null)} onConfirm={() => doRecycle(confirm)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onToast={toast} />}
+      {keepOne && <KeepOneDialog set={keepOne} generation={generation} onCancel={() => setKeepOne(null)} onConfirm={recycleCopies} />}
       <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </>
   );

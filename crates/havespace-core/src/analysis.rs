@@ -88,3 +88,123 @@ pub fn extension_totals(t: &Tree) -> Vec<ExtTotal> {
     v.sort_by(|a, b| b.size.cmp(&a.size));
     v
 }
+
+// ---------------------------------------------------------------------------------------------
+// Age: when data was last modified.
+
+/// 100 ns FILETIME ticks per day.
+const FT_DAY: u64 = 864_000_000_000;
+/// FILETIME of 1970-01-01.
+const FT_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
+
+/// Current time as a Windows FILETIME.
+pub fn now_filetime() -> u64 {
+    let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    FT_UNIX_EPOCH + unix.as_nanos() as u64 / 100
+}
+
+/// Days since 1970 for a FILETIME, at least 1 (0 means unknown).
+pub fn filetime_to_days(ft: u64) -> u32 {
+    if ft <= FT_UNIX_EPOCH {
+        0
+    } else {
+        (((ft - FT_UNIX_EPOCH) / FT_DAY) as u32).max(1)
+    }
+}
+
+/// For every node, the newest modification time of a live counted file inside it (a file's own time
+/// for files). 0 where nothing is known. Folders' own timestamps are ignored: they change whenever an
+/// entry is added or removed, which says little about the data.
+pub fn newest_mtimes(t: &Tree) -> Vec<u64> {
+    let live = t.live_mask();
+    let mut newest = vec![0u64; t.len()];
+    // Children have larger ids than parents, so a reverse sweep is a post-order.
+    for i in (0..t.len()).rev() {
+        let id = i as NodeId;
+        if is_counted_file(t, &live, id) {
+            newest[i] = t.mtime[i];
+        }
+        if i > 0 && live[i] {
+            let p = t.parent[i] as usize;
+            newest[p] = newest[p].max(newest[i]);
+        }
+    }
+    newest
+}
+
+/// Age bands, newest first; the last one (no upper bound) is "5 years or more".
+pub const AGE_BANDS_DAYS: [u32; 5] = [30, 182, 365, 730, 1826];
+/// Files untouched for at least this long are "stale".
+pub const STALE_DAYS: u32 = 730;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgeBand {
+    /// Lower bound in days (inclusive); the band ends at the next band's start.
+    pub min_days: u32,
+    pub size: u64,
+    pub files: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgeSummary {
+    /// Six bands: < 1 month, 1–6 months, 6–12 months, 1–2 years, 2–5 years, 5+ years.
+    pub bands: Vec<AgeBand>,
+    /// Files with no usable timestamp.
+    pub unknown_size: u64,
+    pub unknown_files: u64,
+    pub stale_days: u32,
+    pub stale_size: u64,
+    pub stale_files: u64,
+    /// Largest stale files.
+    pub stale_largest: Vec<Ranked>,
+    /// Folders holding the most stale data in their own files (not counting subfolders).
+    pub stale_folders: Vec<Ranked>,
+}
+
+fn band_of(age_days: u32) -> usize {
+    AGE_BANDS_DAYS.iter().position(|&b| age_days < b).unwrap_or(AGE_BANDS_DAYS.len())
+}
+
+/// How the scanned bytes split by last-modified age, plus where the stale data is. `now` is a FILETIME.
+pub fn age_summary(t: &Tree, now: u64, k: usize) -> AgeSummary {
+    let live = t.live_mask();
+    let today = filetime_to_days(now);
+    let mut bands: Vec<AgeBand> = std::iter::once(0).chain(AGE_BANDS_DAYS).map(|d| AgeBand { min_days: d, size: 0, files: 0 }).collect();
+    let (mut unknown_size, mut unknown_files, mut stale_size, mut stale_files) = (0, 0, 0, 0);
+    let mut own_stale = vec![0u64; t.len()];
+    let mut is_stale = vec![false; t.len()];
+    for i in 1..t.len() {
+        let id = i as NodeId;
+        if !is_counted_file(t, &live, id) {
+            continue;
+        }
+        let d = filetime_to_days(t.mtime[i]);
+        if d == 0 {
+            unknown_size += t.size[i];
+            unknown_files += 1;
+            continue;
+        }
+        let age = today.saturating_sub(d);
+        let b = &mut bands[band_of(age)];
+        b.size += t.size[i];
+        b.files += 1;
+        if age >= STALE_DAYS {
+            stale_size += t.size[i];
+            stale_files += 1;
+            is_stale[i] = true;
+            own_stale[t.parent[i] as usize] += t.size[i];
+        }
+    }
+    AgeSummary {
+        bands,
+        unknown_size,
+        unknown_files,
+        stale_days: STALE_DAYS,
+        stale_size,
+        stale_files,
+        stale_largest: top_by(t, k, |id| is_stale[id as usize].then(|| t.size[id as usize])),
+        stale_folders: top_by(t, k, |id| (live[id as usize] && t.is_dir(id) && own_stale[id as usize] > 0).then(|| own_stale[id as usize])),
+    }
+}

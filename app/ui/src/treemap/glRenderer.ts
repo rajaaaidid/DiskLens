@@ -64,6 +64,8 @@ export class GlassRenderer {
 
   theme = 0;
   hover = 0;
+  /** Tile tint strength: 1 for file types, more for age colours. */
+  tintBoost = 1;
   /** Seconds of aurora animation; frozen when reduced motion is on. */
   time = 0;
 
@@ -77,7 +79,7 @@ export class GlassRenderer {
     this.auroraProg = program(gl, FULLSCREEN_VS, AURORA_FS);
     this.blockProg = program(gl, BLOCK_VS, BLOCK_FS);
     for (const n of ["uTime", "uTheme", "uResolution", "uBlur", "uScale", "uOpacity"]) this.uA[n] = gl.getUniformLocation(this.auroraProg, n);
-    for (const n of ["uOrigin", "uResolution", "uDpr", "uHover", "uBlurTex", "uTheme", "uTime"]) this.uB[n] = gl.getUniformLocation(this.blockProg, n);
+    for (const n of ["uOrigin", "uResolution", "uDpr", "uHover", "uBlurTex", "uTheme", "uTime", "uTintBoost"]) this.uB[n] = gl.getUniformLocation(this.blockProg, n);
 
     this.emptyVao = gl.createVertexArray()!;
 
@@ -189,6 +191,7 @@ export class GlassRenderer {
     gl.uniform1f(this.uB.uHover, this.hover);
     gl.uniform1f(this.uB.uTheme, this.theme);
     gl.uniform1f(this.uB.uTime, this.time);
+    gl.uniform1f(this.uB.uTintBoost, this.tintBoost);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     // Clip to the treemap area (with room for the hover shadow to spill a little).

@@ -7,6 +7,8 @@ HaveSpace was called **DiskLens** up to version 0.2.0.
 > **Status:** all six milestones are done: the scanner and CLI, the glass treemap on real scan data, tree list ↔
 > treemap linking with space-hog insights and safe actions, the NTFS MFT fast path (C:, 1.06M files, in
 > **4.5–6.3 s**), CSV/JSON export, an instant-reopen scan cache, a portable build, and a WCAG AA contrast pass.
+> Since then: a duplicate file finder, colouring the treemap by age with a stale-data report, and Windows
+> integration (Explorer menu, taskbar jump list, tray with low-disk warnings).
 > Not done: a signed installer (see *Packaging*).
 
 ![C: drive, light theme](docs/screens/c-drive-light.png)
@@ -15,8 +17,8 @@ HaveSpace was called **DiskLens** up to version 0.2.0.
 
 ```
 crates/havespace-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories,
-                          actions, scan cache, scan diff, export
-crates/havespace-cli       `havespace` command-line tool (scan, bench, compare, diff, export, fixture)
+                          actions, scan cache, scan diff, export, duplicate finder, age analysis
+crates/havespace-cli       `havespace` command-line tool (scan, bench, compare, diff, dupes, export, fixture)
 crates/havespace-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
@@ -68,7 +70,7 @@ How the app works:
 - **Streaming:** the scan runs on a background thread. `scan-progress` events reach the UI every 120 ms, and the UI
   pulls a fresh layout at most every 450 ms, so the treemap fills in while the scan runs. Folders that are still
   being read shimmer.
-- **Binary layout:** `treemap_layout` returns a binary payload (48 bytes per block, plus names; see
+- **Binary layout:** `treemap_layout` returns a binary payload (56 bytes per block, plus names; see
   `src-tauri/src/encode.rs`) rather than JSON. The UI decodes it straight into the WebGL instance buffer.
 - **Animation:** zooming plays a 300 ms camera morph. Streamed refreshes and window resizes glide blocks to their new
   positions in 240 ms, and labels move with them.
@@ -99,7 +101,88 @@ edits the fake data.
   - **Files:** the 50 largest files.
   - **Folders:** folders ranked by the data held directly inside them, not counting subfolders.
   - **Types:** a stacked category bar plus a per-extension breakdown.
+  - **Age:** how the data splits by last-modified date, and where the stale data is (see below).
+  - **Dupes:** files with identical contents, on request (see below).
   - **Changes:** what grew, shrank, appeared or disappeared since the previous scan (see below).
+
+### Colour by age: find stale data
+
+![Treemap coloured by age](docs/screens/age.png)
+
+The **Type / Age** switch in the toolbar recolours the treemap by when files were last modified, from cyan (this
+month) to rose (5+ years). A legend appears in the corner. A folder drawn as one tile counts as recent as the
+newest file inside it, so warm tiles are data that nobody has touched. The tooltip, and the tree list's *Modified*
+column for folders, show that same newest date.
+
+The **Age** tab shows:
+
+- **Bands:** bytes and files in six age bands: under a month, 1–6 months, 6–12 months, 1–2 years, 2–5 years, and 5+
+  years.
+- **Stale data:** the total not modified in 2+ years.
+- **Folders with the most stale data:** counting stale files directly inside each folder.
+- **Largest stale files.**
+
+The age tiles carry more tint than the type colours, so the bands stay apart over the aurora. Their labels sit on a
+denser pill, and `contrast-audit.mjs` checks both modes.
+
+### Duplicate files
+
+![Duplicate sets](docs/screens/duplicates.png)
+
+The **Dupes** tab looks for files with identical contents in the folder you're viewing, for files of at least
+100 KB, 1 MB (the default), 10 MB or 100 MB. It runs in the background with progress and **Cancel**.
+
+How it works (`crates/havespace-core/src/dupes.rs`):
+
+- **Only files that could match are read:** a file is read only if another file has exactly the same size. Hashes
+  are BLAKE3, read by 4 threads.
+- **Sample first:** it hashes the first and last 64 KiB of each file. Files no bigger than 128 KiB are hashed whole
+  at this step. Files that still match are then hashed whole.
+- **Hard links aren't duplicates:** extra names of a hard-linked file are never candidates. Names that turn out to
+  be the same file (by volume serial and file index) are merged, which covers the `FindFirstFileExW` path, where the
+  scan can't see hard links.
+- **Nothing gets downloaded:** online-only OneDrive files are skipped, and files are opened with
+  `FILE_FLAG_OPEN_NO_RECALL`.
+- **The tree stays usable:** the tree is locked only while candidates are listed, so recycling and the treemap
+  keep working during a search.
+
+Each set lists its copies with their dates. **Keep one…** asks which copy to keep, defaulting to the oldest
+(usually the original), and sends the others to the Recycle Bin. The usual safety rules apply: copies HaveSpace
+refuses to recycle stay where they are, and the dialog shows any warnings. Sets update in place after recycling.
+
+From the CLI:
+
+```bash
+target\release\havespace.exe dupes D:\Photos --min-size 1048576 --top 20
+```
+
+`--json` prints the full report, and `--readers N` sets the number of parallel readers.
+
+### Windows integration
+
+![Settings](docs/screens/settings.png)
+
+The gear in the title bar opens **Settings**. Everything there is per user (HKCU, no admin rights) and off by
+default:
+
+- **Explorer menu:** *Analyze with HaveSpace* on folders, drives and folder backgrounds. On Windows 11 it's under
+  *Show more options*. If you move the portable folder, the menu entries are re-pointed at the new location on the
+  next start.
+- **Notification area:** closing the window keeps HaveSpace running in the tray. Every 5 minutes it checks the
+  fixed drives, and it shows a Windows notification when one has less than 5, 10 (the default), 15 or 20% free.
+  Each drive is reported once, until it recovers. Clicking the notification opens that drive (its saved scan if
+  there is one). *Show a sample warning* sends one now. The notifications come from **HaveSpace**, even for the
+  portable exe: the app registers its sender name under `HKCU\Software\Classes\AppUserModelId\HaveSpace.Desktop`.
+- **Start with Windows:** starts hidden in the tray at sign-in (`HaveSpace.exe --tray`).
+
+Two things are always on:
+
+- **Jump list:** right-click HaveSpace on the taskbar to reopen any of your recent saved scans instantly
+  (`HaveSpace.exe --saved <folder>`).
+- **One tray icon:** only one running HaveSpace owns the tray, so extra windows never add icons. If that one quits,
+  another running window takes the tray over.
+
+Settings are stored in `%LOCALAPPDATA%\HaveSpace\settings.json`.
 
 ### Scan cache: reopen instantly
 
@@ -238,6 +321,12 @@ Benchmark repeated scans (run 1 is cold-ish, later runs hit the OS cache):
 target\release\havespace.exe bench C:\ --runs 3 --method walk
 ```
 
+Find duplicate files (see *Duplicate files*):
+
+```bash
+target\release\havespace.exe dupes D:\Photos --top 20
+```
+
 Generate a fake tree to scan:
 
 ```bash
@@ -349,6 +438,11 @@ The tests cover:
   hit-testing and speed.
 - **Space hogs and protection:** every hog rule, nested matches counted once, deleted items dropping out, and which
   paths are refused or warned about.
+- **Duplicates:** real files with identical contents, and look-alikes that differ only in the middle (so the
+  sample step isn't enough). Also covered: hard links, including ones the scan couldn't detect, size limits,
+  searching one folder, recycled copies dropping out, and cancel.
+- **Age:** the age bands, stale totals and folders, newest-file roll-up ignoring extra hard-link names, and deletes
+  making a folder older.
 - **Recycle Bin** (ignored by default; see above): a normal file is recycled; an 8 TiB sparse file is refused
   untouched; and the tripwire reports the permanent delete Windows makes when the pre-check is skipped.
 

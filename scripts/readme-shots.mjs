@@ -87,6 +87,29 @@ await click(changes.x, changes.y);
 await sleep(300);
 await shot("changes");
 
+const tab = async (name) => {
+  const p = await evaluate(`(() => { const b = [...document.querySelectorAll('.panel-head .segmented button')].find(b => b.innerText === ${JSON.stringify(name)}); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await click(p.x, p.y);
+  await sleep(300);
+};
+
+// Treemap coloured by age, with the Age insights.
+await open("color=age");
+await tab("Age");
+await shot("age");
+
+// Duplicate search (demo sets over the fake drive).
+await open("");
+await tab("Dupes");
+const find = await rectOf(".dupe-controls .btn-primary");
+await click(find.x + find.w / 2, find.y + find.h / 2);
+await sleep(2200);
+await shot("duplicates");
+
+await open("settings");
+await sleep(300);
+await shot("settings");
+
 // Click a block (zooms into its top-level folder and selects it), then hover a tree-list row.
 await open("");
 const tm = await rectOf(".treemap-host");

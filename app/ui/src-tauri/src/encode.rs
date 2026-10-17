@@ -1,7 +1,7 @@
 //! Binary layout payload sent to the UI (avoids JSON for tens of thousands of blocks).
 //!
 //! Little-endian. Header (16 bytes): magic `DLLY`, block count u32, names byte length u32, root id u32.
-//! Then `count` blocks of 48 bytes:
+//! Then `count` blocks of 56 bytes:
 //!
 //! | off | type | field |
 //! |-----|------|-------|
@@ -15,14 +15,19 @@
 //! | 42  | u8   | category |
 //! | 43  | u8   | flags (see `BF_*`) |
 //! | 44  | u32  | files in subtree |
+//! | 48  | u32  | newest modification inside, as days since 1970 (0 = unknown) |
+//! | 52  | u32  | reserved (0) |
 //!
 //! Then the names, UTF-8, one per block, separated by NUL (empty for aggregates).
 
+use havespace_core::analysis::filetime_to_days;
 use havespace_core::category::{category_of, Category};
 use havespace_core::layout::Block;
 use havespace_core::tree::{flags, NodeId, Tree};
 
-pub const BLOCK_BYTES: usize = 48;
+use crate::Derived;
+
+pub const BLOCK_BYTES: usize = 56;
 pub const BF_AGGREGATE: u8 = 1;
 pub const BF_DIR: u8 = 2;
 pub const BF_LINK: u8 = 4;
@@ -30,7 +35,8 @@ pub const BF_INACCESSIBLE: u8 = 8;
 /// Folder whose contents are still being scanned.
 pub const BF_PENDING: u8 = 16;
 
-pub fn encode(t: &Tree, root: NodeId, blocks: &[Block], ext_cat: &[u8], dominant: Option<&[u8]>) -> Vec<u8> {
+pub fn encode(t: &Tree, root: NodeId, blocks: &[Block], ext_cat: &[u8], derived: Option<&Derived>) -> Vec<u8> {
+    let dominant = derived.map(|d| d.dominant.as_slice());
     let mut names = String::new();
     for (i, b) in blocks.iter().enumerate() {
         if i > 0 {
@@ -86,6 +92,14 @@ pub fn encode(t: &Tree, root: NodeId, blocks: &[Block], ext_cat: &[u8], dominant
         out.push(f);
         let files = if b.aggregate { b.agg_count } else { t.files[id as usize] };
         out.extend_from_slice(&files.to_le_bytes());
+        // Aggregates show their folder's age. Until a scan finishes, folders have no roll-up yet.
+        let newest = match derived.and_then(|d| d.newest.get(id as usize)) {
+            Some(&n) => n,
+            None if is_dir => 0,
+            None => t.mtime[id as usize],
+        };
+        out.extend_from_slice(&filetime_to_days(newest).to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
     }
     out.extend_from_slice(names.as_bytes());
     out

@@ -27,6 +27,8 @@ export interface ViewBlock {
   depth: number;
   category: Category;
   flags: number;
+  /** Newest modification of a file inside, as days since 1970 (0 = unknown). */
+  newestDays: number;
 }
 
 export interface Layout {
@@ -73,8 +75,66 @@ export interface ScanSummary {
   extensions: { ext: string; size: number; files: number }[];
   categories: { category: Category; size: number; files: number }[];
   hogs: Hog[];
+  age: AgeSummary;
   /** What changed since the previous saved scan of this root; null until compared, or with nothing to compare. */
   changes: ScanChanges | null;
+}
+
+export interface AgeSummary {
+  /** Six bands (see data/age.ts), newest first. */
+  bands: { minDays: number; size: number; files: number }[];
+  unknownSize: number;
+  unknownFiles: number;
+  /** Files untouched for at least this many days count as stale. */
+  staleDays: number;
+  staleSize: number;
+  staleFiles: number;
+  staleLargest: Ranked[];
+  /** Folders ranked by stale data in their own files. */
+  staleFolders: Ranked[];
+}
+
+export interface DupeFile {
+  node: number;
+  path: string;
+  /** Unix ms, 0 if unknown. */
+  mtimeMs: number;
+}
+
+export interface DupeSet {
+  /** Size of one copy. */
+  size: number;
+  files: DupeFile[];
+}
+
+/** A finished duplicate search (re-filtered for anything recycled since). */
+export interface DupeReport {
+  generation: number;
+  /** Folder that was searched. */
+  root: number;
+  rootPath: string;
+  minSize: number;
+  /** Largest waste first; capped, see totalSets. */
+  sets: DupeSet[];
+  totalSets: number;
+  wasted: number;
+  extraCopies: number;
+  candidates: number;
+  bytesRead: number;
+  skippedCloud: number;
+  unreadable: number;
+  cancelled: boolean;
+  elapsedMs: number;
+}
+
+export interface DupeProgress {
+  generation: number;
+  /** 1 = sampling starts and ends, 2 = comparing whole files. */
+  phase: number;
+  filesDone: number;
+  filesTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
 }
 
 export interface Change {
@@ -196,8 +256,29 @@ export type ExportKind = "csv-all" | "csv-folders" | "json-tree";
 
 export interface LaunchOptions {
   scan: string | null;
+  /** Open the saved scan of `scan` instead of scanning (jump list). */
+  saved: boolean;
   focus: string | null;
   theme: "light" | "dark" | null;
+}
+
+export interface IntegrationSettings {
+  /** "Analyze with HaveSpace" in Explorer's right-click menu. */
+  explorerMenu: boolean;
+  /** Keep running in the notification area and warn when a drive runs low. */
+  tray: boolean;
+  /** Start hidden in the tray at sign-in (needs `tray`). */
+  startWithWindows: boolean;
+  /** Warn below this share of free space. */
+  lowDiskPercent: number;
+}
+
+export interface IntegrationInfo {
+  settings: IntegrationSettings;
+  /** This window owns the tray icon. */
+  trayActive: boolean;
+  /** The tray is on, but another HaveSpace window owns it. */
+  trayElsewhere: boolean;
 }
 
 export interface Backend {
@@ -233,6 +314,19 @@ export interface Backend {
   /** Ask where to save; null if cancelled. */
   pickSavePath(defaultName: string, kind: ExportKind): Promise<string | null>;
   exportTree(generation: number, id: number, kind: ExportKind, path: string): Promise<{ items: number }>;
+  /** Look for duplicate files under `root` in the background; progress and the result arrive as events. */
+  startDuplicates(generation: number, root: number, minSize: number): Promise<void>;
+  cancelDuplicates(): Promise<void>;
+  /** The last finished search, without anything recycled since; null if none. */
+  duplicates(generation: number): Promise<DupeReport | null>;
+  onDupesProgress(cb: (p: DupeProgress) => void): () => void;
+  onDupesDone(cb: (r: DupeReport) => void): () => void;
+  getIntegration(): Promise<IntegrationInfo>;
+  setIntegration(settings: IntegrationSettings): Promise<IntegrationInfo>;
+  /** Show the low-disk notification once, as a preview. */
+  testNotification(): Promise<void>;
+  /** A notification was clicked: show this drive (its saved scan when `saved`). */
+  onOpenPath(cb: (p: { path: string; saved: boolean }) => void): () => void;
   setBackdrop(dark: boolean): Promise<void>;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
 }

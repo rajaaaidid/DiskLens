@@ -70,22 +70,34 @@ const labels = {
   dark: { primary: [1, 1, 1, 0.96], secondary: [235 / 255, 240 / 255, 1, 0.76] },
   light: { primary: [10 / 255, 16 / 255, 30 / 255, 0.94], secondary: [10 / 255, 16 / 255, 30 / 255, 0.7] },
 };
+// Age colours (app/ui/src/data/age.ts) are drawn with AGE_TINT_BOOST (Treemap.tsx): leaf tint alpha x 1.8,
+// and in the light theme x 1.3 more, capped at 0.8 (see BLOCK_FS).
+const ages = {
+  "< 1 month": [0.13, 0.83, 0.93], "1-6 months": [0.06, 0.73, 0.51], "6-12 months": [0.52, 0.8, 0.09], "1-2 years": [0.96, 0.62, 0.04],
+  "2-5 years": [0.96, 0.42, 0.18], "5+ years": [0.96, 0.25, 0.37], "no date": [0.61, 0.64, 0.69],
+};
+const modes = [
+  // [name, tints, tint alphas per theme, dark-theme label pill alpha (LABEL_PILL / LABEL_PILL_AGE)]
+  ["file types", cats, { dark: [0.27, 0.4], light: [0.35, 0.52] }, 0.55],
+  ["age", ages, { dark: [0.27 * 1.8, 0.4 * 1.8], light: [Math.min(0.8, 0.27 * 1.8 * 1.3), 0.8] }, 0.64],
+];
+for (const [mode, tints, alphas, pill] of modes)
 for (const [theme, aurora] of [["dark", auroraDark], ["light", auroraLight]]) {
-  console.log(`\n${theme} treemap labels (worst tile)`);
+  console.log(`\n${theme} treemap labels, ${mode} (worst tile)`);
   for (const which of ["primary", "secondary"]) {
     let worst = Infinity;
     let at = "";
-    for (const [name, tint] of Object.entries(cats)) {
+    for (const [name, tint] of Object.entries(tints)) {
       for (const a of aurora) {
         // Saturation boost on the blurred background, as in the shader.
         const l = 0.299 * a[0] + 0.587 * a[1] + 0.114 * a[2];
         const bg = a.map((c) => Math.min(1, Math.max(0, l + (c - l) * 1.35)));
-        for (const tintA of theme === "dark" ? [0.27, 0.4] : [0.35, 0.52]) {
+        for (const tintA of alphas[theme]) {
           let g = bg.map((c, i) => c + (tint[i] - c) * tintA);
           g = g.map((c) => c + (1 - c) * (theme === "light" ? 0.2 : 0.045));
           g = g.map((c) => Math.min(1, c * 1.14 + 0.06)); // brightest spot: top edge + sheen
           // Dark theme: labels sit on a frosted dark pill (LABEL_PILL in Treemap.tsx).
-          if (theme === "dark") g = over([8 / 255, 10 / 255, 24 / 255, 0.55], g);
+          if (theme === "dark") g = over([8 / 255, 10 / 255, 24 / 255, pill], g);
           const r = ratio(over(labels[theme][which], g), g);
           if (r < worst) [worst, at] = [r, name];
         }
