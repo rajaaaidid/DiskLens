@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { backend, BF_AGGREGATE, BF_DIR, type Crumb, type Drive, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
+import { backend, BF_AGGREGATE, BF_DIR, type ActionInfo, type Crumb, type Drive, type Layout, type ScanProgress, type ScanSummary, type ViewBlock } from "./api";
 import { mockFindId } from "./api/mockBackend";
+import { ConfirmRecycle } from "./components/ConfirmRecycle";
+import { ContextMenu, type MenuTarget } from "./components/ContextMenu";
 import { DrivePicker } from "./components/DrivePicker";
-import { IconHome, IconRescan, IconSearch } from "./components/Icons";
+import { IconHome, IconRescan } from "./components/Icons";
+import { Toasts, type Toast } from "./components/Toasts";
 import { InsightsPanel } from "./components/InsightsPanel";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
@@ -15,6 +18,24 @@ import { Treemap, type HoverInfo } from "./treemap/Treemap";
 const params = new URLSearchParams(location.search);
 /** While scanning, refresh the streamed treemap at most this often. */
 const STREAM_REFRESH_MS = 450;
+
+/** Clipboard write that also works when the async Clipboard API is refused (e.g. unfocused webview). */
+async function writeClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (!ok) throw new Error("The clipboard is not available.");
+  }
+}
 
 function usePrefersReducedMotion() {
   const [v, setV] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -52,8 +73,21 @@ export default function App() {
   const [crumbs, setCrumbs] = useState<Crumb[]>([]);
   const [hover, setHover] = useState<HoverInfo | null>(null);
   const [selected, setSelected] = useState<number | undefined>();
+  /** Selected node's ancestors from the scan root down, inclusive. */
+  const [selectedChain, setSelectedChain] = useState<number[]>([]);
+  /** Row hovered in the tree list (lights up the matching block). */
+  const [rowHover, setRowHover] = useState<number | undefined>();
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [confirm, setConfirm] = useState<ActionInfo | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [demoHover, setDemoHover] = useState<number | undefined>();
   const [fps, setFps] = useState(0);
+
+  const toast = useCallback((kind: Toast["kind"], text: string, detail?: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((t) => [...t.slice(-3), { id, kind, text, detail }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "error" ? 9000 : 4500);
+  }, []);
 
   // --- startup ---------------------------------------------------------------------------------
   useEffect(() => {
@@ -82,6 +116,22 @@ export default function App() {
   }, [theme]);
 
   // --- scan lifecycle --------------------------------------------------------------------------
+  /**
+   * A small folder can finish scanning before `startScan` has even returned its generation, so its
+   * `scan-done` / `scan-error` event arrives "early". Keep the newest such event and apply it once the
+   * generation is known.
+   */
+  const early = useRef<{ done?: ScanSummary; error?: { generation: number; error: string } }>({});
+  const applyDone = useCallback((s: ScanSummary) => {
+    setSummary(s);
+    setScanning(false);
+    setTick((t) => t + 1);
+  }, []);
+  const applyError = useCallback((error: string) => {
+    setScanning(false);
+    setError(error);
+  }, []);
+
   const startScan = useCallback((path: string) => {
     setError(null);
     setTarget(path);
@@ -94,14 +144,18 @@ export default function App() {
     backend
       .startScan(path)
       .then((g) => {
+        if (g < genRef.current) return; // an older request resolving late
         genRef.current = g;
         setGeneration(g);
+        // Apply (and drop) only this scan's early event; a newer scan's must survive.
+        const { done, error } = early.current;
+        if (done && done.generation <= g) early.current.done = undefined;
+        if (error && error.generation <= g) early.current.error = undefined;
+        if (done?.generation === g) applyDone(done);
+        else if (error?.generation === g) applyError(error.error);
       })
-      .catch((e) => {
-        setScanning(false);
-        setError(String(e));
-      });
-  }, []);
+      .catch((e) => applyError(String(e)));
+  }, [applyDone, applyError]);
 
   useEffect(() => {
     const offP = backend.onProgress((p) => {
@@ -114,26 +168,30 @@ export default function App() {
       }
     });
     const offD = backend.onDone((s) => {
-      if (s.generation !== genRef.current) return;
-      setSummary(s);
-      setScanning(false);
-      setTick((t) => t + 1);
+      if (s.generation === genRef.current) applyDone(s);
+      else if (s.generation > genRef.current) early.current.done = s;
     });
     const offE = backend.onError((e) => {
-      if (e.generation !== genRef.current) return;
-      setScanning(false);
-      setError(e.error);
+      if (e.generation === genRef.current) applyError(e.error);
+      else if (e.generation > genRef.current) early.current.error = e;
+    });
+    const offS = backend.onSummaryUpdated((s) => {
+      if (s.generation === genRef.current) setSummary(s);
     });
     return () => {
       offP();
       offD();
       offE();
+      offS();
     };
-  }, []);
+  }, [applyDone, applyError]);
 
   // `DiskLens.exe D:\Games [--focus D:\Games\Steam] [--theme light]` (or the browser mockup).
   const focusAfterScan = useRef<string | null>(null);
+  const launched = useRef(false);
   useEffect(() => {
+    if (launched.current) return; // StrictMode runs effects twice in development
+    launched.current = true;
     backend.launchOptions().then((o) => {
       if (o.theme) setTheme(o.theme);
       focusAfterScan.current = o.focus;
@@ -202,16 +260,24 @@ export default function App() {
     if (crumbs.length > 1) zoomTo(crumbs[crumbs.length - 2].id);
   }, [crumbs, zoomTo]);
 
+  // The selection's ancestor chain links the treemap ring and the tree list's expanded path.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === "INPUT") return;
-      if (e.key === "Backspace" || e.key === "Escape") zoomOut();
+    if (selected === undefined || !generation) {
+      setSelectedChain([]);
+      return;
+    }
+    let alive = true;
+    backend
+      .ancestors(generation, selected)
+      .then((c) => alive && setSelectedChain(c.map((x) => x.id)))
+      .catch(() => alive && setSelectedChain([]));
+    return () => {
+      alive = false;
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoomOut]);
+  }, [generation, selected]);
 
-  const reveal = useCallback(
+  /** Select an item by path (insights) and show it: zoom to the folder that contains it. */
+  const showPath = useCallback(
     async (path: string) => {
       const id = await backend.findPath(generation, path);
       if (id === null) return;
@@ -221,6 +287,78 @@ export default function App() {
     },
     [generation, useAlloc, zoomTo],
   );
+
+  // --- actions (each one is an explicit user choice; recycling also needs the dialog) ------------
+  const revealInExplorer = useCallback(
+    (id: number) => backend.reveal(generation, id).catch((e) => toast("error", "Couldn't open Explorer", String(e))),
+    [generation, toast],
+  );
+
+  const copyPath = useCallback(
+    async (id: number) => {
+      try {
+        const info = await backend.nodeInfo(generation, id, false);
+        await writeClipboard(info.path);
+        toast("ok", "Path copied", info.path);
+      } catch (e) {
+        toast("error", "Couldn't copy the path", String(e));
+      }
+    },
+    [generation, toast],
+  );
+
+  /** Open the confirmation for `id`, or explain why it can't be recycled. */
+  const askRecycle = useCallback(
+    async (id: number) => {
+      const info = await backend.actionInfo(generation, id);
+      if (info.recycleBlocked) toast("info", `Can't send “${info.name}” to the Recycle Bin`, info.recycleBlocked);
+      else setConfirm(info);
+    },
+    [generation, toast],
+  );
+
+  const doRecycle = useCallback(
+    async (info: ActionInfo) => {
+      try {
+        const r = await backend.recycle(generation, [info.id]);
+        if (r.recycled.length) {
+          toast("ok", `Moved “${info.name}” to the Recycle Bin`, `${formatBytes(r.freed)} freed · restore it from the Recycle Bin if needed`);
+          if (selected !== undefined && selectedChain.includes(info.id)) setSelected(undefined);
+          if (crumbs.some((c) => c.id === info.id)) zoomTo(crumbs[Math.max(0, crumbs.findIndex((c) => c.id === info.id) - 1)].id);
+          setTick((t) => t + 1);
+          backend.listDrives().then(setDrives);
+        }
+        for (const [path, why] of r.failed) toast("error", `Not moved: ${path.split("\\").pop()}`, why);
+        for (const path of r.permanentlyDeleted) toast("error", "Windows deleted an item permanently", path);
+      } catch (e) {
+        toast("error", "Couldn't send to the Recycle Bin", String(e));
+      } finally {
+        setConfirm(null);
+      }
+    },
+    [generation, toast, selected, selectedChain, crumbs, zoomTo],
+  );
+
+  const openMenu = useCallback((id: number, name: string, isDir: boolean, x: number, y: number) => {
+    setHover(null);
+    setSelected(id);
+    setMenu({ id, name, isDir, x, y });
+  }, []);
+
+  // Keyboard: Backspace/Esc zoom out, Enter zooms into the selection, Delete recycles it (with the
+  // dialog), Ctrl+C copies its path.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === "INPUT" || menu || confirm) return;
+      if (e.key === "Backspace" || e.key === "Escape") zoomOut();
+      else if (selected !== undefined && e.key === "Delete") askRecycle(selected);
+      else if (selected !== undefined && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) copyPath(selected);
+      else if (selected !== undefined && e.key === "Enter")
+        backend.nodeInfo(generation, selected, false).then((i) => i.isDir && zoomTo(i.id));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomOut, selected, menu, confirm, askRecycle, copyPath, generation, zoomTo]);
 
   useEffect(() => {
     if (!summary || !focusAfterScan.current) return;
@@ -245,6 +383,13 @@ export default function App() {
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           subtitle={target ? `${target} · ${formatBytes(summary?.size ?? progress?.bytes ?? 0)}${scanning ? " scanned so far" : ""}` : ""}
+          notice={
+            backend.native ? undefined : (
+              <>
+                Demo data: a browser can't read your disk. Run the DiskLens app (<code>npm run tauri dev</code>) to scan your drives.
+              </>
+            )
+          }
         />
         {showPicker ? (
           <DrivePicker drives={drives} elevated={elevated} onScan={startScan} onPickFolder={pickFolder} />
@@ -281,10 +426,6 @@ export default function App() {
                   {crumbs.length > 0 && <span className="crumb-size">{formatBytes(rootSize)}</span>}
                 </nav>
                 <div className="toolbar-right">
-                  <div className="search" title="Filtering arrives with the tree list linking">
-                    <IconSearch />
-                    <input placeholder="Filter by name or extension" disabled />
-                  </div>
                   <div className="segmented small">
                     <button className={!useAlloc ? "on" : ""} onClick={() => setUseAlloc(false)}>
                       Size
@@ -306,6 +447,13 @@ export default function App() {
                   onHover={setHover}
                   onActivate={onActivate}
                   onResize={(w, h) => setSize({ w, h })}
+                  onContextMenu={(b, x, y) => {
+                    if (!(b.flags & BF_AGGREGATE)) openMenu(b.node, b.name, (b.flags & BF_DIR) !== 0, x, y);
+                    // "Small files" block: act on the folder that holds them.
+                    else backend.nodeInfo(generation, b.node, false).then((i) => openMenu(i.id, i.name, true, x, y));
+                  }}
+                  selectedChain={selectedChain}
+                  linkedHoverNode={rowHover}
                   demoHoverNode={demoHover}
                 />
                 {scanning && !layout?.blocks.length && <div className="treemap-empty">Reading {target}…</div>}
@@ -324,16 +472,33 @@ export default function App() {
                   useAlloc={useAlloc}
                   refreshTick={scanning ? Math.floor(tick / 3) : tick}
                   selectedId={selected}
+                  selectedChain={selectedChain}
+                  linkedHoverId={hover?.block.node}
                   onSelect={setSelected}
                   onOpen={zoomTo}
+                  onHoverRow={setRowHover}
+                  onContextMenu={(r, x, y) => openMenu(r.id, r.name, r.isDir, x, y)}
                 />
               )}
             </main>
-            <InsightsPanel summary={summary} scanning={scanning} onReveal={reveal} />
+            <InsightsPanel summary={summary} scanning={scanning} onReveal={showPath} onOpenInExplorer={revealInExplorer} onItemMenu={openMenu} />
           </div>
         )}
       </div>
-      <Tooltip hover={hover} generation={generation} useAlloc={useAlloc} />
+      {!menu && !confirm && <Tooltip hover={hover} generation={generation} useAlloc={useAlloc} />}
+      {menu && (
+        <ContextMenu
+          target={menu}
+          generation={generation}
+          onClose={() => setMenu(null)}
+          onZoom={zoomTo}
+          onReveal={revealInExplorer}
+          onCopyPath={copyPath}
+          onRecycle={(info) => setConfirm(info)}
+        />
+      )}
+      {confirm && <ConfirmRecycle info={confirm} onCancel={() => setConfirm(null)} onConfirm={() => doRecycle(confirm)} />}
+      <Toasts toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </>
   );
 }

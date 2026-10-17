@@ -2,9 +2,9 @@
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
 
-> **Status:** milestones (a) scanner + CLI, (b) design mockup and (c) the glass treemap on real scan data in
-> Tauri are done. Next up: (d) tree-list ↔ treemap linking, space-hog insights and actions; (e) MFT fast path;
-> (f) polish.
+> **Status:** milestones (a)–(d) are done: the scanner and CLI, the design mockup, the glass treemap on real
+> scan data in Tauri, and the tree list ↔ treemap linking with space-hog insights and safe actions. Next up:
+> (e) the MFT fast path, then (f) polish (export, cache, packaging).
 
 ![C: drive, light theme](docs/screens/c-drive-light.png)
 
@@ -17,7 +17,7 @@ crates/disklens-fixtures  fake directory tree generator (files, hard links, junc
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
 docs/mockup, docs/screens screenshots (fake-data mockup / real app)
-scripts                   screenshot, window capture and UI benchmark helpers
+scripts                   screenshots, window capture, UI benchmark and the end-to-end UI flow (ui-flow.mjs)
 ```
 
 ## Desktop app
@@ -57,8 +57,55 @@ How the app works:
 - **Window:** frameless with a custom title bar. The Mica backdrop comes from `window-vibrancy`, falling back to
   Acrylic on Windows 10. The aurora is drawn at 88% opacity so Mica tints through.
 
-In a plain browser (`npm --prefix app/ui run dev`), the UI uses a mock backend with the fake C: tree. That keeps
-design review and screenshots possible without Tauri.
+In a plain browser (`npm --prefix app/ui run dev`), the UI uses a mock backend with the fake C: tree. A banner in the
+title bar says so. This keeps design review and screenshots possible without Tauri, and "deleting" there only
+edits the fake data.
+
+### Working with results
+
+![Selection linked between treemap and tree list](docs/screens/select-linked.png)
+
+- **Treemap and tree list are linked both ways.**
+  - Clicking a block zooms into its top-level folder and selects the block. The selection gets a violet-to-cyan
+    ring, and the tree list expands to that row and scrolls it into view.
+  - Hovering a row lights up its block, and hovering a block highlights its row.
+  - Double-click a folder row, or press Enter on a selection, to zoom into it. Backspace or Esc zooms out.
+- **Right-click any block, row or insight item** for *Zoom into folder*, *Open in Explorer* (opens the folder with the
+  item selected), *Copy path*, or *Send to Recycle Bin…*. Right-clicking a "small files" block acts on the folder
+  that holds those files. Delete and Ctrl+C work on the selection too.
+- **Insights:**
+  - **Hogs:** known space hogs explained in plain English, each with Windows' own way to reclaim the space:
+    hibernation and page files, WinSxS, Windows.old, the Recycle Bin, System Restore, Temp folders, browser caches,
+    Windows Update downloads, node_modules, .git, Docker/WSL virtual disks and Steam libraries. Nested matches such
+    as `Temp\Temp` count once.
+  - **Files:** the 50 largest files.
+  - **Folders:** folders ranked by the data held directly inside them, not counting subfolders.
+  - **Types:** a stacked category bar plus a per-extension breakdown.
+
+### Sending to the Recycle Bin: safety rules
+
+![Confirmation dialog](docs/screens/confirm-recycle.png)
+
+1. **Confirmation every time.** The dialog shows the name, full path, size and file count, and Cancel has the focus.
+2. **Protected locations are refused** (`crates/disklens-core/src/protect.rs`):
+   - **Refused:** drive roots, `C:\Windows`, System Volume Information, `$Recycle.Bin`, the page, hibernation and
+     swap files, the Program Files and ProgramData roots, `C:\Users` and profile roots, and `AppData`.
+   - **Allowed with a warning in the dialog:** anything inside Program Files, ProgramData or AppData.
+3. **Never a permanent delete.** Left to itself, Windows *permanently* deletes anything it can't recycle (a drive
+   without a Recycle Bin, a bin that's switched off, or an item bigger than the bin's limit), and it doesn't say so
+   in advance. `tests/recycle.rs` proves it: the shell's `PreDeleteItem` reports identical flags for both cases.
+   DiskLens therefore:
+   - **pre-checks every item** against the volume's Recycle Bin settings (`NukeOnDelete` and `MaxCapacity`, the same
+     registry values Explorer uses) and refuses anything that couldn't be recycled;
+   - **keeps a tripwire** on the operation: if Windows ever reports a delete that produced no Recycle Bin item, the
+     remaining items are aborted and the UI reports it.
+4. **Totals update in place.** Sizes, the treemap, the tree list and the insights all update without a rescan.
+
+The real Recycle Bin tests are ignored by default because they put small fixture files into your bin:
+
+```bash
+cargo test --release -p disklens-core --test recycle -- --ignored --test-threads=1
+```
 
 ## Prerequisites
 
@@ -186,6 +233,21 @@ The tests cover:
   without Developer Mode), access-denied folders, cancel, live progress, and walk vs FindFirstFileEx parity.
 - **Treemap layout:** areas proportional to size, no overlaps, children inside their parent, merging of tiny blocks,
   hit-testing and speed.
+- **Space hogs and protection:** every hog rule, nested matches counted once, deleted items dropping out, and which
+  paths are refused or warned about.
+- **Recycle Bin** (ignored by default; see above): a normal file is recycled; an 8 TiB sparse file is refused
+  untouched; and the tripwire reports the permanent delete Windows makes when the pre-check is skipped.
+
+For the UI there's an end-to-end flow driven by real mouse and keyboard input: hover, click-zoom with selection,
+linked hover, context menu, confirm, recycle and the insights tabs. Each step is saved as a screenshot.
+
+```bash
+node scripts/ui-flow.mjs
+```
+
+That runs against the browser build. To drive the real app instead, start it on a throwaway folder (the flow
+really recycles one item) with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9335`, then add `--attach=9335`.
 
 ## UI mockup
 

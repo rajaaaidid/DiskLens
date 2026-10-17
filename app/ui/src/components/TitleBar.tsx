@@ -5,10 +5,12 @@ interface Props {
   theme: "dark" | "light";
   onToggleTheme: () => void;
   subtitle: string;
+  /** Short notice shown in the middle of the bar (e.g. demo mode). */
+  notice?: React.ReactNode;
 }
 
 /** Custom frameless title bar. `data-tauri-drag-region` makes it drag the window. */
-export function TitleBar({ theme, onToggleTheme, subtitle }: Props) {
+export function TitleBar({ theme, onToggleTheme, subtitle, notice }: Props) {
   return (
     <header className="titlebar" data-tauri-drag-region onDoubleClick={() => backend.windowControl("maximize")}>
       <div className="titlebar-brand" data-tauri-drag-region>
@@ -16,6 +18,11 @@ export function TitleBar({ theme, onToggleTheme, subtitle }: Props) {
         <span className="brand-name" data-tauri-drag-region>DiskLens</span>
         {subtitle && <span className="brand-sub" data-tauri-drag-region>{subtitle}</span>}
       </div>
+      {notice && (
+        <div className="titlebar-notice" role="note">
+          {notice}
+        </div>
+      )}
       <div className="titlebar-actions">
         <button className="icon-btn" onClick={onToggleTheme} aria-label="Toggle theme" title="Toggle theme">
           {theme === "dark" ? <IconSun /> : <IconMoon />}

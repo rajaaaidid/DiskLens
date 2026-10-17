@@ -3,10 +3,10 @@
 
 import { CATEGORY_BY_ID } from "../data/categories";
 import { FAKE_DRIVES, FAKE_ROOT, makeStressTree, pathOf } from "../data/fakeTree";
-import { categoryTotals, extensionTotals, largestFiles } from "../data/insights";
+import { categoryTotals, extensionTotals, findHogs, largestFiles } from "../data/insights";
 import type { TreeNode } from "../data/types";
 import { layoutTreemap } from "../treemap/layout";
-import { BF_AGGREGATE, BF_DIR, type Backend, type Layout, type Row, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
+import { BF_AGGREGATE, BF_DIR, type Backend, type Layout, type Protection, type Row, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
 
 const params = new URLSearchParams(location.search);
 const ROOT: TreeNode = params.get("stress") ? makeStressTree(Number(params.get("stress"))) : FAKE_ROOT;
@@ -20,7 +20,11 @@ const byId = new Map<number, TreeNode>();
 const idOf = (n: TreeNode) => (n === ROOT ? 0 : n.id);
 
 let generation = 0;
-const listeners = { progress: new Set<(p: ScanProgress) => void>(), done: new Set<(s: ScanSummary) => void>() };
+const listeners = {
+  progress: new Set<(p: ScanProgress) => void>(),
+  done: new Set<(s: ScanSummary) => void>(),
+  summary: new Set<(s: ScanSummary) => void>(),
+};
 let timer: number | undefined;
 
 function catId(c: string) {
@@ -47,7 +51,42 @@ function summary(): ScanSummary {
     largestFolders: [],
     extensions: extensionTotals(ROOT, 40).map(({ ext, size, files }) => ({ ext, size, files })),
     categories: categoryTotals(ROOT),
+    hogs: findHogs(ROOT).map((h) => ({
+      id: h.id,
+      title: h.title,
+      why: h.why,
+      advice: h.advice,
+      severity: h.severity,
+      recyclable: ["temp", "browsercache", "node_modules"].includes(h.id),
+      size: h.size,
+      count: 1,
+      items: [{ node: idOf(h.node), path: pathOf(h.node), size: h.node.size }],
+    })),
   };
+}
+
+/** Mock version of the Rust protection rules (enough for the demo). */
+function mockProtection(path: string): Protection {
+  const p = path.toLowerCase().replace(/\\$/, "");
+  if (/^[a-z]:$/.test(p)) return { kind: "blocked", reason: "This is the root of a drive." };
+  if (/^c:\\windows(\\|$)/.test(p)) return { kind: "blocked", reason: "Part of Windows. Use Disk Cleanup or Storage settings to reclaim space here." };
+  if (/^c:\\(pagefile|hiberfil|swapfile)\.sys$/.test(p)) return { kind: "blocked", reason: "Used by Windows while it runs. Change it through Windows settings instead." };
+  if (/^c:\\(program files( \(x86\))?|programdata|users(\\[^\\]+)?)$/.test(p)) return { kind: "blocked", reason: "A Windows system folder." };
+  if (/^c:\\(system volume information|\$recycle\.bin)/.test(p)) return { kind: "blocked", reason: "Managed by Windows." };
+  if (/^c:\\program files/.test(p)) return { kind: "warn", reason: "Installed apps live here. Uninstalling from Settings › Apps is safer than deleting files." };
+  if (/\\appdata\\/.test(p)) return { kind: "warn", reason: "App data: programs may lose settings or caches. Close the app first." };
+  return { kind: "none" };
+}
+
+function removeNode(n: TreeNode) {
+  const p = n.parent;
+  if (!p) return;
+  p.children = p.children.filter((c) => c !== n);
+  for (let a: TreeNode | null = p; a; a = a.parent) {
+    a.size -= n.size;
+    a.onDisk -= n.onDisk;
+    a.files -= n.files;
+  }
 }
 
 export const mockBackend: Backend = {
@@ -155,6 +194,38 @@ export const mockBackend: Backend = {
   onProgress: (cb) => (listeners.progress.add(cb), () => listeners.progress.delete(cb)),
   onDone: (cb) => (listeners.done.add(cb), () => listeners.done.delete(cb)),
   onError: () => () => {},
+  onSummaryUpdated: (cb) => (listeners.summary.add(cb), () => listeners.summary.delete(cb)),
+  actionInfo: async (_g, id) => {
+    const n = byId.get(id)!;
+    const path = pathOf(n);
+    const protection = id === 0 ? ({ kind: "blocked", reason: "This is the folder you scanned." } as const) : mockProtection(path);
+    return {
+      id,
+      name: n.name,
+      path,
+      isDir: n.isDir,
+      size: n.size,
+      files: n.files,
+      protection,
+      recycleBlocked: protection.kind === "blocked" ? protection.reason : null,
+    };
+  },
+  recycle: async (_g, ids) => {
+    // Demo only: removes the items from the fake tree. Nothing on disk is touched.
+    let freed = 0;
+    const recycled: number[] = [];
+    for (const id of ids) {
+      const n = byId.get(id);
+      if (!n || id === 0 || mockProtection(pathOf(n)).kind === "blocked") continue;
+      freed += n.size;
+      removeNode(n);
+      recycled.push(id);
+    }
+    const s = summary();
+    listeners.summary.forEach((cb) => cb(s));
+    return { recycled, failed: [], permanentlyDeleted: [], freed };
+  },
+  reveal: async () => {},
   setBackdrop: async () => {},
   windowControl: async () => {},
 };

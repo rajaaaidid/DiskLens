@@ -68,6 +68,40 @@ export interface ScanSummary {
   largestFolders: Ranked[];
   extensions: { ext: string; size: number; files: number }[];
   categories: { category: Category; size: number; files: number }[];
+  hogs: Hog[];
+}
+
+export interface Hog {
+  id: string;
+  title: string;
+  why: string;
+  advice: string;
+  severity: "reclaimable" | "system" | "info";
+  recyclable: boolean;
+  size: number;
+  count: number;
+  items: { node: number; path: string; size: number }[];
+}
+
+export type Protection = { kind: "none" } | { kind: "warn"; reason: string } | { kind: "blocked"; reason: string };
+
+export interface ActionInfo {
+  id: number;
+  name: string;
+  path: string;
+  isDir: boolean;
+  size: number;
+  files: number;
+  protection: Protection;
+  /** Why "Send to Recycle Bin" is unavailable, if it is. */
+  recycleBlocked: string | null;
+}
+
+export interface RecycleResponse {
+  recycled: number[];
+  failed: [string, string][];
+  permanentlyDeleted: string[];
+  freed: number;
 }
 
 export interface NodeInfo {
@@ -132,6 +166,12 @@ export interface Backend {
   onProgress(cb: (p: ScanProgress) => void): () => void;
   onDone(cb: (s: ScanSummary) => void): () => void;
   onError(cb: (e: { generation: number; error: string }) => void): () => void;
+  /** Insights rebuilt after items were sent to the Recycle Bin. */
+  onSummaryUpdated(cb: (s: ScanSummary) => void): () => void;
+  actionInfo(generation: number, id: number): Promise<ActionInfo>;
+  /** Send to the Recycle Bin. Only call after the user confirmed. */
+  recycle(generation: number, ids: number[]): Promise<RecycleResponse>;
+  reveal(generation: number, id: number): Promise<void>;
   setBackdrop(dark: boolean): Promise<void>;
   windowControl(action: "minimize" | "maximize" | "close"): Promise<void>;
 }

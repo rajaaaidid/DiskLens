@@ -1,4 +1,7 @@
 //! Post-scan summaries: largest files and folders, per-extension totals.
+//!
+//! Everything here skips nodes that were sent to the Recycle Bin (and everything inside them), so the
+//! summaries stay correct after deletes without a rescan.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -16,16 +19,9 @@ pub struct Ranked {
     pub files: u32,
 }
 
-fn live(t: &Tree, id: NodeId) -> bool {
-    // A node is live if neither it nor an ancestor was deleted.
-    let mut cur = id;
-    while cur != crate::tree::NONE {
-        if t.has_flag(cur, flags::DELETED) {
-            return false;
-        }
-        cur = t.parent[cur as usize];
-    }
-    true
+/// A live, counted file (not a link or an extra hard-link name).
+pub(crate) fn is_counted_file(t: &Tree, live: &[bool], id: NodeId) -> bool {
+    live[id as usize] && !t.is_dir(id) && !t.has_flag(id, flags::HARDLINK_DUP | flags::LINK)
 }
 
 fn top_by<F: Fn(NodeId) -> Option<u64>>(t: &Tree, k: usize, key: F) -> Vec<Ranked> {
@@ -39,7 +35,7 @@ fn top_by<F: Fn(NodeId) -> Option<u64>>(t: &Tree, k: usize, key: F) -> Vec<Ranke
             heap.push(Reverse((s, id)));
         }
     }
-    let mut v: Vec<_> = heap.into_iter().map(|Reverse(p)| p).filter(|&(_, id)| live(t, id)).collect();
+    let mut v: Vec<_> = heap.into_iter().map(|Reverse(p)| p).collect();
     v.sort_by(|a, b| b.0.cmp(&a.0));
     v.into_iter()
         .map(|(s, id)| Ranked { node: id, path: t.path(id), size: s, alloc: t.alloc[id as usize], files: t.files[id as usize] })
@@ -48,21 +44,21 @@ fn top_by<F: Fn(NodeId) -> Option<u64>>(t: &Tree, k: usize, key: F) -> Vec<Ranke
 
 /// The `k` largest counted files (bounded heap, O(n log k)).
 pub fn largest_files(t: &Tree, k: usize) -> Vec<Ranked> {
-    top_by(t, k, |id| {
-        (!t.is_dir(id) && !t.has_flag(id, flags::HARDLINK_DUP | flags::LINK | flags::DELETED)).then(|| t.size[id as usize])
-    })
+    let live = t.live_mask();
+    top_by(t, k, |id| is_counted_file(t, &live, id).then(|| t.size[id as usize]))
 }
 
 /// The `k` folders holding the most bytes in their *own* files (not counting subfolders), which
 /// surfaces where the data actually sits rather than just `C:\Users`. `size` is that own total.
 pub fn largest_folders(t: &Tree, k: usize) -> Vec<Ranked> {
+    let live = t.live_mask();
     let mut own = vec![0u64; t.len()];
     for id in 1..t.len() {
-        if !t.is_dir(id as NodeId) && !t.has_flag(id as NodeId, flags::DELETED) {
+        if is_counted_file(t, &live, id as NodeId) {
             own[t.parent[id] as usize] += t.size[id];
         }
     }
-    top_by(t, k, |id| (t.is_dir(id) && own[id as usize] > 0).then(|| own[id as usize]))
+    top_by(t, k, |id| (live[id as usize] && t.is_dir(id) && own[id as usize] > 0).then(|| own[id as usize]))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,9 +69,10 @@ pub struct ExtTotal {
 }
 
 pub fn extension_totals(t: &Tree) -> Vec<ExtTotal> {
+    let live = t.live_mask();
     let mut acc = vec![(0u64, 0u64); t.ext_names().len()];
     for id in 0..t.len() as NodeId {
-        if t.is_dir(id) || t.has_flag(id, flags::HARDLINK_DUP | flags::LINK | flags::DELETED) {
+        if !is_counted_file(t, &live, id) {
             continue;
         }
         let e = &mut acc[t.ext[id as usize] as usize];

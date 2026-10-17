@@ -104,7 +104,8 @@ void main() {
     r = vec4(c - hs, hs * 2.0);
     r.y -= 1.5 * uHover;
   }
-  float margin = overlay ? 22.0 : 1.0;
+  bool selectedRing = mod(floor(flags / 32.0), 2.0) >= 1.0;
+  float margin = overlay ? 22.0 : selectedRing ? 8.0 : 1.0;
   vec2 hs = r.zw * 0.5;
   vec2 local = (aCorner * 2.0 - 1.0) * (hs + margin);
   vec2 px = uOrigin + r.xy + hs + local;          // CSS px, y down
@@ -153,6 +154,7 @@ void main() {
   bool aggregate = mod(floor(flags / 4.0), 2.0) >= 1.0;
   bool isDir     = mod(floor(flags / 8.0), 2.0) >= 1.0;
   bool pending   = mod(floor(flags / 16.0), 2.0) >= 1.0;
+  bool selected  = mod(floor(flags / 32.0), 2.0) >= 1.0;
 
   float minSide = min(vHalf.x, vHalf.y) * 2.0;
   float radius = clamp(minSide * 0.22, 0.0, 7.0);
@@ -221,6 +223,18 @@ void main() {
   col += (hash12(gl_FragCoord.xy) - 0.5) * 0.028;
 
   float a = inside;
+
+  if (selected) {
+    // Selection: a crisp 2px violet→cyan ring just inside the edge plus a faint outer glow.
+    vec3 ringCol = mix(vec3(0.66, 0.55, 0.98), vec3(0.13, 0.83, 0.93), clamp(tx * 0.5 + 0.5, 0.0, 1.0));
+    if (uTheme > 0.5) ringCol *= 0.8;
+    float ring = (1.0 - smoothstep(1.6, 2.6, abs(d + 1.4))) ;
+    float glowOut = exp(-max(d, 0.0) / 3.0) * (1.0 - inside) * 0.55;
+    float fill = inside * 0.06;
+    float sa = clamp(ring + glowOut + fill, 0.0, 1.0);
+    outColor = vec4(ringCol * sa, sa) * alpha;
+    return;
+  }
 
   if (overlay) {
     // Hover: shadow and glow outside, brighten + glowing rim inside.

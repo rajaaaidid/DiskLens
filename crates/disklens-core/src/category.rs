@@ -135,9 +135,10 @@ pub struct CategoryTotal {
 }
 
 pub fn category_totals(t: &Tree, ext_cat: &[u8]) -> Vec<CategoryTotal> {
+    let live = t.live_mask();
     let mut acc = [(0u64, 0u64); COUNT];
     for id in 0..t.len() as NodeId {
-        if t.is_dir(id) || t.has_flag(id, flags::HARDLINK_DUP | flags::LINK | flags::DELETED) {
+        if !crate::analysis::is_counted_file(t, &live, id) {
             continue;
         }
         let c = category_of(t, ext_cat, id) as usize;

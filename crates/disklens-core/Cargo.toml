@@ -11,6 +11,8 @@ serde.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+windows = { version = "0.58", features = ["implement", "Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+windows-core = "0.58"
 
 [dev-dependencies]
 disklens-fixtures = { path = "../disklens-fixtures" }

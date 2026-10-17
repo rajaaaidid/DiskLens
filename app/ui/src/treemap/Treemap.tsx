@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { BF_AGGREGATE, BF_DIR, BF_PENDING, type Layout, type ViewBlock } from "../api";
 import { CATEGORY_COLORS } from "../data/categories";
 import { formatBytes, formatCount } from "../data/format";
-import { FLAG_AGGREGATE, FLAG_DIR, FLAG_LEAF, FLAG_OVERLAY, FLAG_PENDING, INSTANCE_FLOATS } from "./glRenderer";
+import { FLAG_AGGREGATE, FLAG_DIR, FLAG_LEAF, FLAG_OVERLAY, FLAG_PENDING, FLAG_SELECTED, INSTANCE_FLOATS } from "./glRenderer";
 import { stage } from "./stage";
 
 export interface HoverInfo {
@@ -20,6 +20,11 @@ interface Props {
   /** Click on a block; `top` is the top-level block under the cursor (the zoom target). */
   onActivate: (top: ViewBlock, hit: ViewBlock) => void;
   onResize: (width: number, height: number) => void;
+  onContextMenu: (hit: ViewBlock, clientX: number, clientY: number) => void;
+  /** Selected node and its ancestors (root first); the deepest one drawn gets the selection ring. */
+  selectedChain?: number[];
+  /** Node hovered elsewhere (tree list); lit up like a hover while the mouse is not on the treemap. */
+  linkedHoverNode?: number;
   /** Screenshot helper: pin the hover state on this node. */
   demoHoverNode?: number;
 }
@@ -72,7 +77,21 @@ function writeInstance(out: Float32Array, i: number, b: ViewBlock, x: number, y:
   out[o + 10] = b.header;
 }
 
-export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onResize, demoHoverNode }: Props) {
+/** Index of the deepest drawn (non-aggregate) block whose node is in `chain`, or -1. */
+function findInChain(blocks: ViewBlock[], chain: number[] | undefined): number {
+  if (!chain?.length) return -1;
+  const at = new Map<number, number>();
+  blocks.forEach((b, i) => {
+    if (!(b.flags & BF_AGGREGATE)) at.set(b.node, i);
+  });
+  for (let k = chain.length - 1; k >= 0; k--) {
+    const i = at.get(chain[k]);
+    if (i !== undefined) return i;
+  }
+  return -1;
+}
+
+export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onResize, onContextMenu, selectedChain, linkedHoverNode, demoHoverNode }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLCanvasElement>(null);
   const state = useRef({
@@ -88,9 +107,11 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
     labelsDirty: true,
     theme,
     pending: false,
+    selected: -1,
+    mouseInside: false,
   });
-  const cb = useRef({ onHover, onActivate, onResize });
-  cb.current = { onHover, onActivate, onResize };
+  const cb = useRef({ onHover, onActivate, onResize, onContextMenu });
+  cb.current = { onHover, onActivate, onResize, onContextMenu };
 
   // Track the host size; the parent requests a layout for it.
   useEffect(() => {
@@ -140,6 +161,25 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
     s.dirty = s.labelsDirty = true;
   }, [layout]);
 
+  // Selection ring follows the selected node (or its nearest drawn ancestor).
+  useEffect(() => {
+    const s = state.current;
+    s.selected = findInChain(s.blocks, selectedChain);
+    s.dirty = true;
+  }, [selectedChain, layout]);
+
+  // Hover linked from the tree list, while the mouse is elsewhere.
+  useEffect(() => {
+    const s = state.current;
+    if (s.mouseInside) return;
+    const idx = linkedHoverNode === undefined ? -1 : s.blocks.findIndex((b) => b.node === linkedHoverNode && !(b.flags & BF_AGGREGATE));
+    if (idx !== s.hovered) {
+      s.hovered = idx;
+      s.hoverStart = -1;
+      s.dirty = true;
+    }
+  }, [linkedHoverNode, layout]);
+
   useEffect(() => {
     state.current.theme = theme;
     state.current.labelsDirty = true;
@@ -183,7 +223,7 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
 
       const blocks = s.blocks;
       const anim = s.anim;
-      const total = blocks.length + (anim ? anim.outgoing.length : 0) + 1;
+      const total = blocks.length + (anim ? anim.outgoing.length : 0) + 2;
       if (s.buf.length < total * INSTANCE_FLOATS) s.buf = new Float32Array(Math.ceil(total * 1.5) * INSTANCE_FLOATS);
       const buf = s.buf;
       let n = 0;
@@ -207,9 +247,13 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
           const b = blocks[i];
           writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, blockFlags(b));
         }
-        if (s.hovered >= 0 && s.hoverT > 0) {
+        if (s.hovered >= 0 && s.hoverT > 0 && blocks[s.hovered]) {
           const b = blocks[s.hovered];
           writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, blockFlags(b) | FLAG_OVERLAY);
+        }
+        if (s.selected >= 0 && blocks[s.selected]) {
+          const b = blocks[s.selected];
+          writeInstance(buf, n++, b, b.x, b.y, b.w, b.h, 1, FLAG_SELECTED);
         }
       }
       r.setInstances(buf, n);
@@ -258,6 +302,7 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
   const onMove = (ev: React.MouseEvent) => {
     const s = state.current;
     if (s.anim && s.anim.duration === ZOOM_MS) return;
+    s.mouseInside = true;
     const [x, y] = localPoint(ev);
     const idx = hitTest(s.blocks, x, y);
     if (idx !== s.hovered) {
@@ -270,8 +315,17 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
     cb.current.onHover(idx >= 0 ? { block: s.blocks[idx], clientX: ev.clientX, clientY: ev.clientY } : null);
   };
 
+  const onContext = (ev: React.MouseEvent) => {
+    ev.preventDefault();
+    const s = state.current;
+    const [x, y] = localPoint(ev);
+    const idx = hitTest(s.blocks, x, y);
+    if (idx >= 0) cb.current.onContextMenu(s.blocks[idx], ev.clientX, ev.clientY);
+  };
+
   const onLeave = () => {
     const s = state.current;
+    s.mouseInside = false;
     if (s.hovered >= 0) {
       s.hovered = -1;
       s.hoverStart = -1;
@@ -292,7 +346,7 @@ export function Treemap({ layout, theme, reduceMotion, onHover, onActivate, onRe
   };
 
   return (
-    <div ref={hostRef} className="treemap-host" onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
+    <div ref={hostRef} className="treemap-host" onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick} onContextMenu={onContext}>
       <canvas ref={labelRef} className="treemap-labels" />
     </div>
   );

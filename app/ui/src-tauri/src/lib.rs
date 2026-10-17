@@ -10,7 +10,10 @@ mod system;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
+use disklens_core::actions::{self, RecycleItem};
 use disklens_core::analysis::{extension_totals, largest_files, largest_folders, ExtTotal, Ranked};
+use disklens_core::hogs::{find_hogs, Hog};
+use disklens_core::protect::{protection, Protection};
 use disklens_core::category::{category_of, category_totals, dominant_categories, ext_categories, CategoryTotal};
 use disklens_core::layout::{layout, LayoutOptions};
 use disklens_core::scan::{scan, Inaccessible, Method, Progress, ScanOptions};
@@ -28,6 +31,44 @@ struct Session {
     /// Dominant category per node, computed when a scan completes.
     dominant: Option<Arc<Vec<u8>>>,
     summary: Option<Arc<Summary>>,
+    /// How the last scan went; kept so the summary can be rebuilt after deletes.
+    meta: Option<ScanMeta>,
+}
+
+#[derive(Clone)]
+struct ScanMeta {
+    method: Method,
+    fallback_reason: Option<String>,
+    cancelled: bool,
+    elapsed_ms: u64,
+    inaccessible: Vec<Inaccessible>,
+}
+
+/// Everything the insights panel shows, computed from the live (non-deleted) part of the tree.
+fn build_summary(generation: u64, t: &Tree, meta: &ScanMeta) -> (Summary, Vec<u8>) {
+    let ext_cat = ext_categories(t);
+    let dominant = dominant_categories(t, &ext_cat);
+    let summary = Summary {
+        generation,
+        root: t.path(0),
+        method: meta.method,
+        fallback_reason: meta.fallback_reason.clone(),
+        cancelled: meta.cancelled,
+        elapsed_ms: meta.elapsed_ms,
+        files: t.files[0] as u64,
+        dirs: t.dirs[0] as u64,
+        size: t.size[0],
+        size_on_disk: t.alloc[0],
+        nodes: t.len(),
+        tree_bytes: t.heap_bytes(),
+        inaccessible: meta.inaccessible.clone(),
+        largest_files: largest_files(t, 50),
+        largest_folders: largest_folders(t, 50),
+        extensions: extension_totals(t).into_iter().take(40).collect(),
+        categories: category_totals(t, &ext_cat),
+        hogs: find_hogs(t),
+    };
+    (summary, dominant)
 }
 
 #[derive(Default)]
@@ -70,6 +111,7 @@ struct Summary {
     largest_folders: Vec<Ranked>,
     extensions: Vec<ExtTotal>,
     categories: Vec<CategoryTotal>,
+    hogs: Vec<Hog>,
 }
 
 #[tauri::command]
@@ -96,6 +138,7 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
         s.scanning = true;
         s.dominant = None;
         s.summary = None;
+        s.meta = None;
         (s.tree.clone(), s.progress.clone(), s.generation)
     };
 
@@ -128,32 +171,20 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
         let st = app.state::<AppState>();
         let summary = match result {
             Ok(res) => {
-                let t = tree.read().unwrap();
-                let ext_cat = ext_categories(&t);
-                let dominant = Arc::new(dominant_categories(&t, &ext_cat));
-                let summary = Arc::new(Summary {
-                    generation,
-                    root: t.path(0),
+                let meta = ScanMeta {
                     method: res.method,
                     fallback_reason: res.fallback_reason,
                     cancelled: res.cancelled,
                     elapsed_ms: res.elapsed.as_millis() as u64,
-                    files: t.files[0] as u64,
-                    dirs: t.dirs[0] as u64,
-                    size: t.size[0],
-                    size_on_disk: t.alloc[0],
-                    nodes: t.len(),
-                    tree_bytes: t.heap_bytes(),
                     inaccessible: res.inaccessible,
-                    largest_files: largest_files(&t, 50),
-                    largest_folders: largest_folders(&t, 50),
-                    extensions: extension_totals(&t).into_iter().take(40).collect(),
-                    categories: category_totals(&t, &ext_cat),
-                });
+                };
+                let (summary, dominant) = build_summary(generation, &tree.read().unwrap(), &meta);
+                let summary = Arc::new(summary);
                 let mut s = st.0.lock().unwrap();
                 if s.generation == generation {
-                    s.dominant = Some(dominant);
+                    s.dominant = Some(Arc::new(dominant));
                     s.summary = Some(summary.clone());
+                    s.meta = Some(meta);
                     s.scanning = false;
                 }
                 Ok(summary)
@@ -406,6 +437,155 @@ async fn find_path(state: State<'_, AppState>, generation: u64, path: String) ->
     Ok(Some(cur))
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActionInfo {
+    id: NodeId,
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+    files: u32,
+    protection: Protection,
+    /// Why "Send to Recycle Bin" is unavailable (protected, no bin, too big, scanning...), if it is.
+    recycle_blocked: Option<String>,
+}
+
+fn recycle_size(t: &Tree, id: NodeId) -> u64 {
+    t.size[id as usize].max(t.alloc[id as usize])
+}
+
+/// What can be done with a node; drives the context menu and the confirmation dialog.
+#[tauri::command]
+async fn action_info(state: State<'_, AppState>, generation: u64, id: NodeId) -> Result<ActionInfo, String> {
+    let scanning = state.0.lock().unwrap().scanning;
+    let (tree, current, _) = state.snapshot();
+    if generation != current {
+        return Err("stale generation".into());
+    }
+    let t = tree.read().unwrap();
+    if id as usize >= t.len() {
+        return Err("no such node".into());
+    }
+    let path = t.path(id);
+    let prot = protection(&path);
+    let size = recycle_size(&t, id);
+    let recycle_blocked = if scanning {
+        Some("Wait for the scan to finish.".to_string())
+    } else if id == 0 {
+        Some("This is the folder you scanned.".to_string())
+    } else if let Protection::Blocked(r) = &prot {
+        Some(r.to_string())
+    } else if t.has_flag(id, flags::DELETED) {
+        Some("Already sent to the Recycle Bin.".to_string())
+    } else {
+        match actions::recycle_bin_capacity(&path) {
+            None => Some(actions::NO_RECYCLE_BIN.to_string()),
+            Some(cap) if size as f64 > cap as f64 * 0.98 => Some(actions::TOO_BIG_FOR_BIN.to_string()),
+            Some(_) => None,
+        }
+    };
+    Ok(ActionInfo { id, name: t.name(id).to_string(), path, is_dir: t.is_dir(id), size: t.size[id as usize], files: t.files[id as usize], protection: prot, recycle_blocked })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RecycleResponse {
+    recycled: Vec<NodeId>,
+    failed: Vec<(String, String)>,
+    permanently_deleted: Vec<String>,
+    /// Logical bytes removed from the drive.
+    freed: u64,
+}
+
+/// Send nodes to the Recycle Bin (the UI has already asked the user to confirm), then update every
+/// total in place: no rescan.
+#[tauri::command]
+async fn recycle_nodes(app: AppHandle, state: State<'_, AppState>, generation: u64, ids: Vec<NodeId>) -> Result<RecycleResponse, String> {
+    if state.0.lock().unwrap().scanning {
+        return Err("Wait for the scan to finish.".into());
+    }
+    let (tree, current, _) = state.snapshot();
+    if generation != current {
+        return Err("stale generation".into());
+    }
+    // Resolve and vet the items under a read lock.
+    let mut items = Vec::new();
+    let mut by_path = Vec::new();
+    let mut failed = Vec::new();
+    {
+        let t = tree.read().unwrap();
+        for id in ids {
+            if id == 0 || id as usize >= t.len() || t.has_flag(id, flags::DELETED) {
+                continue;
+            }
+            let path = t.path(id);
+            if let Protection::Blocked(r) = protection(&path) {
+                failed.push((path, r.to_string()));
+                continue;
+            }
+            by_path.push((path.clone(), id));
+            items.push(RecycleItem { path, size: recycle_size(&t, id) });
+        }
+    }
+    let out = tauri::async_runtime::spawn_blocking(move || actions::recycle(items)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+    failed.extend(out.failed);
+
+    // Update totals for everything that is gone (recycled, or, should the tripwire ever fire, deleted).
+    let gone: Vec<NodeId> = out
+        .recycled
+        .iter()
+        .chain(&out.permanently_deleted)
+        .filter_map(|p| by_path.iter().find(|(bp, _)| bp.eq_ignore_ascii_case(p)).map(|(_, id)| *id))
+        .collect();
+    let mut freed = 0;
+    {
+        let mut t = tree.write().unwrap();
+        for &id in &gone {
+            if !t.has_flag(id, flags::DELETED) {
+                freed += t.size[id as usize];
+                t.mark_deleted(id);
+            }
+        }
+    }
+    let recycled: Vec<NodeId> = out.recycled.iter().filter_map(|p| by_path.iter().find(|(bp, _)| bp.eq_ignore_ascii_case(p)).map(|(_, id)| *id)).collect();
+
+    if !gone.is_empty() {
+        // Rebuild insights from the updated tree and let the UI refresh.
+        let meta = state.0.lock().unwrap().meta.clone();
+        if let Some(meta) = meta {
+            let (summary, dominant) = build_summary(generation, &tree.read().unwrap(), &meta);
+            let summary = Arc::new(summary);
+            {
+                let mut s = state.0.lock().unwrap();
+                if s.generation == generation {
+                    s.summary = Some(summary.clone());
+                    s.dominant = Some(Arc::new(dominant));
+                }
+            }
+            let _ = app.emit("summary-updated", summary.as_ref());
+        }
+    }
+    Ok(RecycleResponse { recycled, failed, permanently_deleted: out.permanently_deleted, freed })
+}
+
+/// Open Explorer with the item selected.
+#[tauri::command]
+async fn reveal_node(state: State<'_, AppState>, generation: u64, id: NodeId) -> Result<(), String> {
+    let (tree, current, _) = state.snapshot();
+    if generation != current {
+        return Err("stale generation".into());
+    }
+    let path = {
+        let t = tree.read().unwrap();
+        if id as usize >= t.len() {
+            return Err("no such node".into());
+        }
+        t.path(id)
+    };
+    tauri::async_runtime::spawn_blocking(move || actions::reveal_in_explorer(path)).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
 /// Re-apply the Mica backdrop for the current theme.
 #[tauri::command]
 fn set_backdrop(window: WebviewWindow, dark: bool) {
@@ -445,6 +625,9 @@ pub fn run() {
             ancestors,
             find_path,
             launch_options,
+            action_info,
+            recycle_nodes,
+            reveal_node,
             set_backdrop
         ])
         .run(tauri::generate_context!())

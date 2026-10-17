@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { backend, type Row } from "../api";
 import { CATEGORY_BY_ID, cssColor } from "../data/categories";
 import { formatBytes, formatCount, formatDate, formatPercent } from "../data/format";
@@ -11,11 +11,17 @@ interface Props {
   rootId: number;
   rootSize: number;
   useAlloc: boolean;
-  /** Bumped while a scan streams in, to refresh sizes. */
+  /** Bumped while a scan streams in or after deletes, to refresh sizes. */
   refreshTick: number;
   selectedId?: number;
+  /** Selected node's ancestors from the scan root down (inclusive); folders on the way get expanded. */
+  selectedChain?: number[];
+  /** Node hovered in the treemap. */
+  linkedHoverId?: number;
   onSelect: (id: number) => void;
   onOpen: (id: number) => void;
+  onHoverRow: (id: number | undefined) => void;
+  onContextMenu: (row: Row, clientX: number, clientY: number) => void;
 }
 
 interface Node {
@@ -24,19 +30,30 @@ interface Node {
   parentSize: number;
 }
 
-/** Folder tree of the current treemap root. Children load lazily when a folder is expanded. */
-export function TreeList({ generation, rootId, rootSize, useAlloc, refreshTick, selectedId, onSelect, onOpen }: Props) {
+/** Folder tree of the current treemap root, linked both ways with the treemap. Children load lazily. */
+export function TreeList(props: Props) {
+  const { generation, rootId, rootSize, useAlloc, refreshTick, selectedId, selectedChain, linkedHoverId, onSelect, onOpen, onHoverRow, onContextMenu } = props;
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "size", desc: true });
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [kids, setKids] = useState<Map<number, Row[]>>(new Map());
+  const rowRefs = useRef(new Map<number, HTMLDivElement>());
+  const scrollPending = useRef(false);
 
-  // Reset when the root changes.
   useEffect(() => {
     setOpen(new Set());
     setKids(new Map());
   }, [generation, rootId]);
 
-  // (Re)load the root and every expanded folder.
+  // Reveal the selection: expand every folder between the current root and the selected item.
+  useEffect(() => {
+    if (!selectedChain?.length) return;
+    const at = selectedChain.indexOf(rootId);
+    if (at < 0) return;
+    const between = selectedChain.slice(at + 1, -1);
+    scrollPending.current = true;
+    if (between.length) setOpen((o) => (between.every((id) => o.has(id)) ? o : new Set([...o, ...between])));
+  }, [selectedChain, rootId]);
+
   useEffect(() => {
     let alive = true;
     const ids = [rootId, ...open];
@@ -66,6 +83,16 @@ export function TreeList({ generation, rootId, rootSize, useAlloc, refreshTick, 
     return out;
   }, [kids, sort, open, rootId, rootSize, useAlloc]);
 
+  // Scroll the selected row into view once it has been rendered.
+  useEffect(() => {
+    if (!scrollPending.current || selectedId === undefined) return;
+    const el = rowRefs.current.get(selectedId);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      scrollPending.current = false;
+    }
+  }, [rows, selectedId]);
+
   const header = (key: SortKey, label: string, cls = "") => (
     <button className={`th ${cls} ${sort.key === key ? "sorted" : ""}`} onClick={() => setSort((s) => ({ key, desc: s.key === key ? !s.desc : key !== "name" }))}>
       {label}
@@ -81,7 +108,7 @@ export function TreeList({ generation, rootId, rootSize, useAlloc, refreshTick, 
     });
 
   return (
-    <section className="treelist glass">
+    <section className="treelist glass" onMouseLeave={() => onHoverRow(undefined)}>
       <div className="tl-head">
         {header("name", "Name", "c-name")}
         {header("size", useAlloc ? "On disk" : "Size", "c-size")}
@@ -89,17 +116,28 @@ export function TreeList({ generation, rootId, rootSize, useAlloc, refreshTick, 
         {header("files", "Files", "c-files")}
         {header("mtime", "Modified", "c-date")}
       </div>
-      <div className="tl-body">
+      <div className="tl-body" role="tree" aria-label="Folder tree">
         {rows.map(({ row, depth, parentSize }) => {
           const size = useAlloc ? row.sizeOnDisk : row.size;
           const frac = parentSize > 0 ? size / parentSize : 0;
           const cat = CATEGORY_BY_ID[row.category] ?? "other";
+          const cls = ["tl-row", selectedId === row.id && "selected", linkedHoverId === row.id && "linked", row.inaccessible && "denied"].filter(Boolean).join(" ");
           return (
             <div
               key={row.id}
-              className={`tl-row ${selectedId === row.id ? "selected" : ""} ${row.inaccessible ? "denied" : ""}`}
+              ref={(el) => (el ? rowRefs.current.set(row.id, el) : rowRefs.current.delete(row.id))}
+              role="treeitem"
+              aria-selected={selectedId === row.id}
+              aria-expanded={row.isDir && row.hasChildren ? open.has(row.id) : undefined}
+              className={cls}
               onClick={() => onSelect(row.id)}
               onDoubleClick={() => row.isDir && onOpen(row.id)}
+              onMouseEnter={() => onHoverRow(row.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                onSelect(row.id);
+                onContextMenu(row, e.clientX, e.clientY);
+              }}
               title={row.inaccessible ? "Access denied" : row.link ? "Link (not followed)" : undefined}
             >
               <span className="c-name" style={{ paddingLeft: 8 + depth * 16 }}>

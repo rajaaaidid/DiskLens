@@ -247,6 +247,17 @@ impl Tree {
             + self.ext_lookup.capacity() * 40
     }
 
+    /// `true` for every node that is neither deleted nor inside a deleted folder. One forward pass
+    /// (parents always have smaller ids than their children).
+    pub fn live_mask(&self) -> Vec<bool> {
+        let mut live = vec![true; self.len()];
+        for i in 0..self.len() {
+            let p = self.parent[i];
+            live[i] = self.flags[i] & flags::DELETED == 0 && (p == NONE || live[p as usize]);
+        }
+        live
+    }
+
     /// Release growth slack in the columns once a scan is complete.
     pub fn shrink_to_fit(&mut self) {
         self.parent.shrink_to_fit();

@@ -9,6 +9,8 @@ export const FLAG_AGGREGATE = 4;
 export const FLAG_DIR = 8;
 /** Folder still being scanned: drawn with a moving shimmer. */
 export const FLAG_PENDING = 16;
+/** Selection ring (drawn as an extra overlay instance). */
+export const FLAG_SELECTED = 32;
 
 export interface Viewport {
   /** Treemap origin + size in CSS px, window space. */

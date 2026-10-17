@@ -5,9 +5,12 @@
 //! - [`layout`]: nested squarified treemap layout.
 //! - [`analysis`]: largest files/folders and extension totals.
 
+pub mod actions;
 pub mod analysis;
 pub mod category;
+pub mod hogs;
 pub mod layout;
+pub mod protect;
 pub mod scan;
 pub mod tree;
 
