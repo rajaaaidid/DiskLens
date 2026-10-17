@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use disklens_core::actions::{self, RecycleItem};
 use disklens_core::cache::{self, CacheMeta};
+use disklens_core::diff::{diff, ScanDiff};
 use disklens_core::export;
 use disklens_core::analysis::{extension_totals, largest_files, largest_folders, ExtTotal, Ranked};
 use disklens_core::hogs::{find_hogs, Hog};
@@ -48,6 +49,22 @@ struct ScanMeta {
     scanned_at_ms: u64,
     /// Loaded from the scan cache rather than scanned just now.
     from_cache: bool,
+    /// What changed since the previous saved scan of the same root, once computed.
+    changes: Option<Changes>,
+}
+
+/// How many changed items and folders the insights panel lists.
+const CHANGES_SHOWN: usize = 50;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Changes {
+    /// When the earlier scan finished (Unix ms).
+    since_ms: u64,
+    /// The earlier scan used a different method (e.g. MFT vs walk), so small differences are expected.
+    method_differs: bool,
+    #[serde(flatten)]
+    diff: ScanDiff,
 }
 
 /// Everything the insights panel shows, computed from the live (non-deleted) part of the tree.
@@ -75,28 +92,70 @@ fn build_summary(generation: u64, t: &Tree, meta: &ScanMeta) -> (Summary, Vec<u8
         extensions: extension_totals(t).into_iter().take(40).collect(),
         categories: category_totals(t, &ext_cat),
         hogs: find_hogs(t),
+        changes: meta.changes.clone(),
     };
     (summary, dominant)
 }
 
+fn save_cache(t: &Tree, meta: &ScanMeta) {
+    let cm = CacheMeta {
+        root: t.path(0),
+        scanned_at_ms: meta.scanned_at_ms,
+        method: meta.method,
+        fallback_reason: meta.fallback_reason.clone(),
+        elapsed_ms: meta.elapsed_ms,
+        inaccessible: meta.inaccessible.clone(),
+        size: t.size[0],
+        files: t.files[0] as u64,
+        dirs: t.dirs[0] as u64,
+    };
+    if let Err(e) = cache::save(&cm, t) {
+        eprintln!("could not save the scan cache: {e}");
+    }
+}
+
 /// Write the scan cache on a background thread (the tree is read-locked while it is serialized).
 fn save_cache_async(tree: Arc<RwLock<Tree>>, meta: ScanMeta) {
+    std::thread::spawn(move || save_cache(&tree.read().unwrap(), &meta));
+}
+
+/// After a fresh scan, on a background thread: compare it with the previous saved scan of the same root
+/// (read before it is overwritten), save the new scan, then add the changes to the insights and emit
+/// `summary-updated`.
+fn diff_then_save_async(app: AppHandle, generation: u64, tree: Arc<RwLock<Tree>>, meta: ScanMeta) {
     std::thread::spawn(move || {
         let t = tree.read().unwrap();
-        let cm = CacheMeta {
-            root: t.path(0),
-            scanned_at_ms: meta.scanned_at_ms,
-            method: meta.method,
-            fallback_reason: meta.fallback_reason.clone(),
-            elapsed_ms: meta.elapsed_ms,
-            inaccessible: meta.inaccessible.clone(),
-            size: t.size[0],
-            files: t.files[0] as u64,
-            dirs: t.dirs[0] as u64,
+        let changes = match cache::load(&t.path(0)) {
+            Ok((old_meta, old)) => Some(Changes {
+                since_ms: old_meta.scanned_at_ms,
+                method_differs: old_meta.method != meta.method,
+                diff: diff(&old, &t, CHANGES_SHOWN),
+            }),
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("could not read the previous scan to compare: {e}");
+                }
+                None
+            }
         };
-        if let Err(e) = cache::save(&cm, &t) {
-            eprintln!("could not save the scan cache: {e}");
-        }
+        save_cache(&t, &meta);
+        drop(t);
+        let Some(changes) = changes else { return };
+        let st = app.state::<AppState>();
+        let summary = {
+            let mut s = st.0.lock().unwrap();
+            if s.generation != generation {
+                return;
+            }
+            if let Some(m) = s.meta.as_mut() {
+                m.changes = Some(changes.clone());
+            }
+            let Some(old) = s.summary.as_deref() else { return };
+            let summary = Arc::new(Summary { changes: Some(changes), ..old.clone() });
+            s.summary = Some(summary.clone());
+            summary
+        };
+        let _ = app.emit("summary-updated", summary.as_ref());
     });
 }
 
@@ -143,6 +202,7 @@ struct Summary {
     extensions: Vec<ExtTotal>,
     categories: Vec<CategoryTotal>,
     hogs: Vec<Hog>,
+    changes: Option<Changes>,
 }
 
 #[tauri::command]
@@ -223,6 +283,7 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
         let opts = ScanOptions { root: path.into(), method, threads: 0 };
         let result = scan(&opts, &progress, Some(tree.clone()));
         let st = app.state::<AppState>();
+        let mut compare_next = None;
         let summary = match result {
             Ok(res) => {
                 let meta = ScanMeta {
@@ -233,18 +294,22 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
                     inaccessible: res.inaccessible,
                     scanned_at_ms: cache::now_ms(),
                     from_cache: false,
+                    changes: None,
                 };
                 let (summary, dominant) = build_summary(generation, &tree.read().unwrap(), &meta);
                 let summary = Arc::new(summary);
-                if !meta.cancelled {
-                    save_cache_async(tree.clone(), meta.clone());
+                {
+                    let mut s = st.0.lock().unwrap();
+                    if s.generation == generation {
+                        s.dominant = Some(Arc::new(dominant));
+                        s.summary = Some(summary.clone());
+                        s.meta = Some(meta.clone());
+                        s.scanning = false;
+                    }
                 }
-                let mut s = st.0.lock().unwrap();
-                if s.generation == generation {
-                    s.dominant = Some(Arc::new(dominant));
-                    s.summary = Some(summary.clone());
-                    s.meta = Some(meta);
-                    s.scanning = false;
+                // A cancelled scan is partial: comparing or saving it would be misleading.
+                if !meta.cancelled {
+                    compare_next = Some(meta);
                 }
                 Ok(summary)
             }
@@ -259,6 +324,10 @@ fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: 
         match summary {
             Ok(s) => {
                 let _ = app.emit("scan-done", s.as_ref());
+                // After `scan-done`, so the `summary-updated` carrying the changes can't arrive first.
+                if let Some(meta) = compare_next {
+                    diff_then_save_async(app.clone(), generation, tree.clone(), meta);
+                }
             }
             Err(e) => {
                 let _ = app.emit("scan-error", serde_json::json!({ "generation": generation, "error": e }));
@@ -651,6 +720,7 @@ async fn open_cache(app: AppHandle, state: State<'_, AppState>, root: String) ->
         inaccessible: cm.inaccessible,
         scanned_at_ms: cm.scanned_at_ms,
         from_cache: true,
+        changes: None,
     };
     let tree = Arc::new(RwLock::new(tree));
     let generation = {

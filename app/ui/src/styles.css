@@ -24,6 +24,9 @@
   --warn: #fbbf24;
   --good: #34d399;
   --bad: #fb7185;
+  /* Text colours for space gained / freed (checked by scripts/contrast-audit.mjs). */
+  --grow: rgba(253, 164, 175, 1);
+  --shrink: rgba(110, 231, 183, 1);
 
   --radius: 16px;
   --radius-sm: 10px;
@@ -50,6 +53,8 @@
   --warn: #b45309;
   --good: #047857;
   --bad: #be123c;
+  --grow: rgba(159, 18, 57, 1);
+  --shrink: rgba(4, 95, 70, 1);
 }
 
 * {
@@ -1545,4 +1550,79 @@ input:disabled {
 .scan-head .chip {
   flex: none;
   padding: 3px 8px;
+}
+/* changes since the last scan */
+.delta {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.delta.up {
+  color: var(--grow);
+}
+.delta.down {
+  color: var(--shrink);
+}
+.change-summary {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--inset);
+  border: 1px solid var(--hairline);
+}
+.change-since {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.change-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.change-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.change-stats .delta {
+  font-size: 15px;
+}
+.stat-label {
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.stat-sub {
+  color: var(--text-3);
+  font-size: 11px;
+}
+.change-summary .tab-note {
+  margin: 8px 0 0;
+}
+.change-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--glass-hover);
+  color: var(--text-2);
+}
+.change-tag.added {
+  color: var(--grow);
+}
+.change-tag.removed {
+  color: var(--shrink);
+}
+.file-rank li.gone {
+  cursor: default;
+}
+.file-rank li.gone .file-name {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
 }

@@ -73,6 +73,42 @@ export interface ScanSummary {
   extensions: { ext: string; size: number; files: number }[];
   categories: { category: Category; size: number; files: number }[];
   hogs: Hog[];
+  /** What changed since the previous saved scan of this root; null until compared, or with nothing to compare. */
+  changes: ScanChanges | null;
+}
+
+export interface Change {
+  path: string;
+  kind: "added" | "removed" | "grew" | "shrank";
+  isDir: boolean;
+  /** Size in the earlier scan and now (for folders, the whole folder). */
+  before: number;
+  after: number;
+  /** Bytes gained, negative when freed. For folders, only the change directly inside them. */
+  delta: number;
+  /** Node in the current scan; null for removed items. */
+  node: number | null;
+}
+
+export interface ScanChanges {
+  /** When the earlier scan finished (Unix ms). */
+  sinceMs: number;
+  /** The earlier scan used another method (MFT vs walk), so small differences are expected. */
+  methodDiffers: boolean;
+  before: number;
+  after: number;
+  filesBefore: number;
+  filesAfter: number;
+  /** Totals over every changed item, not just the listed ones. */
+  grew: number;
+  shrank: number;
+  added: number;
+  removed: number;
+  changed: number;
+  /** Largest changes first: changed files, and new or gone files and folders. */
+  items: Change[];
+  /** Folders ranked by the change directly inside them. */
+  folders: Change[];
 }
 
 export interface Hog {

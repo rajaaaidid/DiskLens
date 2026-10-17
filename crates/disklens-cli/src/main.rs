@@ -2,6 +2,7 @@
 //!
 //!   disklens scan C:\ --top 20 [--method auto|walk|findfirst|mft] [--threads N] [--json]
 //!   disklens bench C:\ --runs 3 [--method walk]
+//!   disklens diff C:\ [--top 20] [--save] [--against old.dlc] [--json]
 //!   disklens fixture D:\tmp\fake --files 1000000 --depth 12
 
 use std::path::PathBuf;
@@ -72,6 +73,25 @@ enum Cmd {
         #[arg(long, default_value = "auto")]
         method: Method,
     },
+    /// Scan, then show what changed since the saved scan of the same drive or folder (the app saves
+    /// one after every scan).
+    Diff {
+        path: PathBuf,
+        /// How many changed items and folders to list.
+        #[arg(long, default_value_t = 20)]
+        top: usize,
+        /// Compare against this cache file instead of the saved scan of `path`.
+        #[arg(long)]
+        against: Option<PathBuf>,
+        /// Save this scan as the new baseline for the next diff (and for the app's *Recent scans*).
+        #[arg(long)]
+        save: bool,
+        #[arg(long, default_value = "auto")]
+        method: Method,
+        /// Print machine-readable JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Generate a fake directory tree for testing and benchmarks.
     Fixture {
         path: PathBuf,
@@ -94,6 +114,7 @@ fn main() {
         Cmd::Bench { path, runs, method, threads } => run_bench(path, runs, method, threads),
         Cmd::Compare { path } => run_compare(path),
         Cmd::Export { path, format, out, folders_only, depth, method } => run_export(path, format, out, folders_only, depth, method),
+        Cmd::Diff { path, top, against, save, method, json } => run_diff(path, top, against, save, method, json),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
             match disklens_fixtures::generate(&path, files, depth, max_file, seed) {
@@ -315,6 +336,121 @@ fn run_export(path: PathBuf, format: disklens_core::export::Format, out: Option<
             eprintln!("export failed: {e}");
             1
         }
+    }
+}
+
+fn run_diff(path: PathBuf, top: usize, against: Option<PathBuf>, save: bool, method: Method, json: bool) -> i32 {
+    use disklens_core::cache::{self, CacheMeta};
+    use disklens_core::diff::{diff, ChangeKind};
+
+    let root = disklens_core::scan::root_display_name(&path);
+    // Read the baseline before scanning: `--save` replaces it.
+    let baseline = match &against {
+        Some(f) => cache::load_file(f).map(Some),
+        None => match cache::load(&root) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            r => r.map(Some),
+        },
+    };
+    let baseline = match baseline {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("could not read the saved scan: {e}");
+            return 1;
+        }
+    };
+    if baseline.is_none() && !save {
+        eprintln!("No saved scan of {root} yet. Scan it in the app, or run this again with --save to keep this scan as the baseline.");
+        return 1;
+    }
+
+    let progress = Progress::default();
+    let res = match scan(&ScanOptions { root: path, method, threads: 0 }, &progress, None) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("scan failed: {e}");
+            return 1;
+        }
+    };
+    if res.cancelled {
+        eprintln!("scan cancelled; nothing compared or saved");
+        return 1;
+    }
+    let tree = res.tree.read().unwrap();
+    let scanned_at_ms = cache::now_ms();
+    if save {
+        let meta = CacheMeta {
+            root: tree.path(0),
+            scanned_at_ms,
+            method: res.method,
+            fallback_reason: res.fallback_reason.clone(),
+            elapsed_ms: res.elapsed.as_millis() as u64,
+            inaccessible: res.inaccessible.clone(),
+            size: tree.size[0],
+            files: tree.files[0] as u64,
+            dirs: tree.dirs[0] as u64,
+        };
+        if let Err(e) = cache::save(&meta, &tree) {
+            eprintln!("could not save the scan: {e}");
+            return 1;
+        }
+    }
+    let Some((old_meta, old)) = baseline else {
+        eprintln!("Saved this scan of {root} as the baseline. Run the same command later to see what changed.");
+        return 0;
+    };
+
+    let d = diff(&old, &tree, top);
+    if json {
+        let v = serde_json::json!({
+            "root": tree.path(0),
+            "since_ms": old_meta.scanned_at_ms,
+            "method_before": old_meta.method,
+            "method_after": res.method,
+            "diff": d,
+        });
+        println!("{}", serde_json::to_string_pretty(&v).unwrap());
+        return 0;
+    }
+
+    let signed = |v: i64| format!("{}{}", if v < 0 { "-" } else { "+" }, format_bytes(v.unsigned_abs()));
+    let ago = format_ago(scanned_at_ms.saturating_sub(old_meta.scanned_at_ms));
+    println!("DiskLens changes in {} since the saved scan ({ago})", tree.path(0));
+    println!("  size          {} -> {}  ({})", format_bytes(d.before), format_bytes(d.after), signed(d.after as i64 - d.before as i64));
+    println!("  files         {} -> {}", d.files_before, d.files_after);
+    println!("  grew          {}  ({} new, {} changed)", format_bytes(d.grew), d.added, d.changed);
+    println!("  freed         {}  ({} gone)", format_bytes(d.shrank), d.removed);
+    if old_meta.method != res.method {
+        println!("  note          the saved scan used {:?} and this one {:?}; small differences are expected", old_meta.method, res.method);
+    }
+    if d.items.is_empty() {
+        println!("\nNothing changed.");
+        return 0;
+    }
+    println!("\nFolders that changed most (changes directly inside them)");
+    for (k, c) in d.folders.iter().enumerate() {
+        println!("  {:>3}. {:>11}  {}", k + 1, signed(c.delta), c.path);
+    }
+    println!("\nBiggest changes");
+    for (k, c) in d.items.iter().enumerate() {
+        let tag = match c.kind {
+            ChangeKind::Added => "new",
+            ChangeKind::Removed => "gone",
+            ChangeKind::Grew => "grew",
+            ChangeKind::Shrank => "shrank",
+        };
+        println!("  {:>3}. {:>11}  {:<6} {}{}", k + 1, signed(c.delta), tag, c.path, if c.is_dir { "\\" } else { "" });
+    }
+    0
+}
+
+fn format_ago(ms: u64) -> String {
+    let m = ms / 60_000;
+    match m {
+        0 => "just now".into(),
+        1..=59 => format!("{m} min ago"),
+        60..=2879 => format!("{} h ago", m / 60),
+        _ => format!("{} days ago", m / 1440),
     }
 }
 

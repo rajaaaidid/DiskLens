@@ -13,8 +13,8 @@ A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmo
 
 ```
 crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories,
-                          actions, scan cache, export
-crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, export, fixture)
+                          actions, scan cache, scan diff, export
+crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, diff, export, fixture)
 crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
@@ -97,6 +97,7 @@ edits the fake data.
   - **Files:** the 50 largest files.
   - **Folders:** folders ranked by the data held directly inside them, not counting subfolders.
   - **Types:** a stacked category bar plus a per-extension breakdown.
+  - **Changes:** what grew, shrank, appeared or disappeared since the previous scan (see below).
 
 ### Scan cache: reopen instantly
 
@@ -110,6 +111,41 @@ again after each Recycle Bin action, so the cache matches what's on disk.
   for the full C: scan and 0.23 s for small folders. The sidebar then shows *Saved scan · 2 h ago* with a
   **Rescan** button.
 - **Safety:** loading checks every index and length, so a damaged cache file gives an error, never a crash.
+
+### Changes since the last scan
+
+![Changes tab](docs/screens/changes.png)
+
+When a fresh scan finishes, DiskLens compares it with the saved scan of the same drive or folder, *before*
+replacing that saved scan. The **Changes** tab then shows:
+
+- **Totals:** how much grew, how much was freed, and the net change, with counts of new, gone and changed items.
+- **Folders that changed most:** ranked by the change *directly inside* each folder (its own files, plus
+  subfolders that are new or gone). That way `C:\Users` doesn't hide the `Downloads` folder that actually grew.
+- **Biggest changes:** files that grew or shrank, plus new or gone files and folders. A whole new folder is one
+  entry, not one per file. Click an entry to show it in the treemap; gone items are struck through.
+
+How the comparison works (`crates/disklens-core/src/diff.rs`):
+
+- Both trees are walked together from the root, matching names case-insensitively. Only logical sizes are compared.
+- **Skipped:** folders that couldn't be read in either scan, junctions and symlinks, and files whose hard-link
+  status changed (which name of a hard-linked file carries the bytes can differ from one scan to the next).
+- **Already handled:** items sent to the Recycle Bin before the earlier scan was saved count as already gone.
+- **Not compared:** cancelled scans and scans opened from *Recent scans*. If the earlier scan used another method
+  (MFT vs walk), the tab says so, since small differences are then expected.
+- **Speed:** the comparison runs in the background after `scan-done`, so the treemap appears as fast as before.
+
+From the CLI (the saved scan is the one the app writes; `--save` makes this scan the new baseline):
+
+```bash
+target\release\disklens.exe diff C:\ --top 20
+```
+
+```bash
+target\release\disklens.exe diff D:\Projects --save --json
+```
+
+`--against <file.dlc>` compares with a specific cache file instead.
 
 ### Export
 

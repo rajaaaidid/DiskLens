@@ -4,10 +4,12 @@
 //! - [`scan`]: parallel directory walk and NTFS MFT fast path, with live progress and cancel.
 //! - [`layout`]: nested squarified treemap layout.
 //! - [`analysis`]: largest files/folders and extension totals.
+//! - [`diff`]: what changed between two scans of the same root.
 
 pub mod actions;
 pub mod analysis;
 pub mod cache;
+pub mod diff;
 pub mod export;
 pub mod category;
 pub mod hogs;
