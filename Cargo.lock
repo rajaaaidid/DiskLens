@@ -1316,7 +1316,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "havespace-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "havespace-core",
  "serde",
@@ -1332,7 +1332,7 @@ dependencies = [
 
 [[package]]
 name = "havespace-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "havespace-core",
@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "havespace-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "blake3",
  "crossbeam-channel",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "havespace-fixtures"
-version = "0.2.0"
+version = "0.3.0"
 
 [[package]]
 name = "heck"
