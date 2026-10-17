@@ -200,7 +200,7 @@ export default function App() {
     };
   }, [applyDone, applyError]);
 
-  // `DiskLens.exe D:\Games [--focus D:\Games\Steam] [--theme light]` (or the browser mockup).
+  // `HaveSpace.exe D:\Games [--focus D:\Games\Steam] [--theme light]` (or the browser mockup).
   const focusAfterScan = useRef<string | null>(null);
   const launched = useRef(false);
   useEffect(() => {
@@ -385,7 +385,7 @@ export default function App() {
     async (kind: ExportKind) => {
       const where = crumbs.length ? crumbs[crumbs.length - 1].name.replace(/[\\/:*?"<>|]+/g, "").trim() || "drive" : "scan";
       const stamp = new Date().toISOString().slice(0, 10);
-      const name = `DiskLens ${where} ${stamp}${kind === "csv-folders" ? " folders" : ""}.${kind === "json-tree" ? "json" : "csv"}`;
+      const name = `HaveSpace ${where} ${stamp}${kind === "csv-folders" ? " folders" : ""}.${kind === "json-tree" ? "json" : "csv"}`;
       try {
         const path = await backend.pickSavePath(name, kind);
         if (!path) return;
@@ -421,7 +421,7 @@ export default function App() {
           notice={
             backend.native || params.has("shots") ? undefined : (
               <>
-                Demo data: a browser can't read your disk. Run the DiskLens app (<code>npm run tauri dev</code>) to scan your drives.
+                Demo data: a browser can't read your disk. Run the HaveSpace app (<code>npm run tauri dev</code>) to scan your drives.
               </>
             )
           }

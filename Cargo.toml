@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/disklens-core", "crates/disklens-cli", "crates/disklens-fixtures", "app/ui/src-tauri"]
+members = ["crates/havespace-core", "crates/havespace-cli", "crates/havespace-fixtures", "app/ui/src-tauri"]
 
 [workspace.package]
 version = "0.2.0"

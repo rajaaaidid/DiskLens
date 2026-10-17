@@ -9,7 +9,7 @@ param(
 )
 $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
 if (-not (Test-Path $edge)) { $edge = "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe" }
-$profileDir = Join-Path $env:TEMP "disklens-shot-profile"
+$profileDir = Join-Path $env:TEMP "havespace-shot-profile"
 $outPath = [IO.Path]::GetFullPath($Out)
 New-Item -ItemType Directory -Force (Split-Path $outPath) | Out-Null
 $url = if ($Query) { "$Base`?$Query" } else { $Base }

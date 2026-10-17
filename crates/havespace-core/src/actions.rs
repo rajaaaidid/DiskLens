@@ -1,6 +1,6 @@
 //! File actions: send to the Recycle Bin and reveal in Explorer.
 //!
-//! DiskLens never deletes permanently. The shell's `IFileOperation` with `FOFX_RECYCLEONDELETE` would
+//! HaveSpace never deletes permanently. The shell's `IFileOperation` with `FOFX_RECYCLEONDELETE` would
 //! still *permanently* delete an item it can't recycle (no Recycle Bin on the drive, bin disabled, or item
 //! larger than the bin's size limit), and it gives no warning beforehand: `PreDeleteItem` reports the
 //! same flags either way (verified: see `tests/recycle.rs`). So:
@@ -33,8 +33,8 @@ pub struct RecycleItem {
     pub size: u64,
 }
 
-pub const NO_RECYCLE_BIN: &str = "This drive has no Recycle Bin (or it is turned off), so the item would be deleted permanently. DiskLens never does that.";
-pub const TOO_BIG_FOR_BIN: &str = "Too large for the Recycle Bin on this drive, so Windows would delete it permanently. DiskLens never does that. Reduce it in smaller pieces or raise the Recycle Bin size.";
+pub const NO_RECYCLE_BIN: &str = "This drive has no Recycle Bin (or it is turned off), so the item would be deleted permanently. HaveSpace never does that.";
+pub const TOO_BIG_FOR_BIN: &str = "Too large for the Recycle Bin on this drive, so Windows would delete it permanently. HaveSpace never does that. Reduce it in smaller pieces or raise the Recycle Bin size.";
 
 /// Fraction of the bin's capacity an item may use (margin for files that grew since the scan).
 const CAPACITY_MARGIN: f64 = 0.98;

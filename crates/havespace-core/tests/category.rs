@@ -1,5 +1,5 @@
-use disklens_core::category::{category_totals, dominant_categories, ext_categories, Category};
-use disklens_core::tree::{RawEntry, Tree, ROOT};
+use havespace_core::category::{category_totals, dominant_categories, ext_categories, Category};
+use havespace_core::tree::{RawEntry, Tree, ROOT};
 
 fn file(name: &str, size: u64) -> RawEntry {
     RawEntry { name: name.into(), is_dir: false, size, alloc: size, mtime: 0, flags: 0, file_id: None }
@@ -31,7 +31,7 @@ fn dominant_category_follows_bytes_not_counts() {
 
 #[test]
 fn swap_files_are_system_not_executables() {
-    use disklens_core::category::category_of;
+    use havespace_core::category::category_of;
     let mut t = Tree::new("C:\\");
     let f = t.add_children(ROOT, &[file("pagefile.sys", 100), file("HIBERFIL.SYS", 50), file("ntfs.sys", 5)]);
     let ec = ext_categories(&t);

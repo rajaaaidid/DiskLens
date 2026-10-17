@@ -11,7 +11,7 @@ import { join } from "node:path";
 //   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=PORT
 // (it must already be scanning a throwaway folder: step 6 really uses the Recycle Bin).
 const attach = process.argv.find((a) => a.startsWith("--attach="))?.split("=")[1];
-const outDir = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? join(tmpdir(), "disklens-flow");
+const outDir = process.argv.slice(2).find((a) => !a.startsWith("--")) ?? join(tmpdir(), "havespace-flow");
 mkdirSync(outDir, { recursive: true });
 const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const port = attach ? Number(attach) : 9334;
@@ -19,7 +19,7 @@ const proc = attach
   ? null
   : spawn(edge, [
       "--headless=new", "--use-angle=d3d11", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
-      `--user-data-dir=${mkdtempSync(join(tmpdir(), "disklens-flow-"))}`, "--window-size=1600,980", "about:blank",
+      `--user-data-dir=${mkdtempSync(join(tmpdir(), "havespace-flow-"))}`, "--window-size=1600,980", "about:blank",
     ], { stdio: "ignore" });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

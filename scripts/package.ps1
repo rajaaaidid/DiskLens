@@ -1,6 +1,6 @@
-# Build a portable DiskLens folder: dist\DiskLens\DiskLens.exe (the app, UI embedded, no dev server
-# needed) plus dist\DiskLens\cli\disklens.exe. Windows file names are case-insensitive, so the app and
-# the CLI can't both be called "disklens.exe" in one folder; the app is built as disklens-app.exe and
+# Build a portable HaveSpace folder: dist\HaveSpace\HaveSpace.exe (the app, UI embedded, no dev server
+# needed) plus dist\HaveSpace\cli\havespace.exe. Windows file names are case-insensitive, so the app and
+# the CLI can't both be called "havespace.exe" in one folder; the app is built as havespace-app.exe and
 # renamed here.
 #
 # Usage: powershell -ExecutionPolicy Bypass -File scripts\package.ps1 [-Installer]
@@ -15,15 +15,15 @@ try {
 } finally { Pop-Location }
 Push-Location $root
 try {
-  cargo build --release -p disklens-cli
+  cargo build --release -p havespace-cli
   if ($LASTEXITCODE -ne 0) { throw "CLI build failed" }
 } finally { Pop-Location }
 
-$dist = Join-Path $root "dist\DiskLens"
+$dist = Join-Path $root "dist\HaveSpace"
 if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
 New-Item -ItemType Directory -Force "$dist\cli" | Out-Null
-Copy-Item "$root\target\release\disklens-app.exe" "$dist\DiskLens.exe"
-Copy-Item "$root\target\release\disklens.exe" "$dist\cli\disklens.exe"
+Copy-Item "$root\target\release\havespace-app.exe" "$dist\HaveSpace.exe"
+Copy-Item "$root\target\release\havespace.exe" "$dist\cli\havespace.exe"
 Copy-Item "$root\README.md" "$dist\README.md"
 Copy-Item "$root\LICENSE" "$dist\LICENSE"
 Get-ChildItem $dist -Recurse -File | Select-Object @{n='File';e={$_.FullName.Substring($dist.Length + 1)}}, @{n='MB';e={[math]::Round($_.Length / 1MB, 1)}}

@@ -85,7 +85,7 @@ export function DrivePicker({ drives, caches, elevated, onScan, onOpenCache, onP
         <div className="picker-note">
           <IconShield />
           <span>
-            Without admin rights, scans walk every folder. As administrator, DiskLens reads the NTFS Master File Table directly, which is
+            Without admin rights, scans walk every folder. As administrator, HaveSpace reads the NTFS Master File Table directly, which is
             several times faster and also sees folders your account can't open.
           </span>
           <button className="btn btn-secondary admin-btn" onClick={onRestartAsAdmin}>

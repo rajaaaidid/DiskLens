@@ -1,5 +1,5 @@
-use disklens_core::hogs::{find_hogs, Severity};
-use disklens_core::tree::{RawEntry, Tree, ROOT};
+use havespace_core::hogs::{find_hogs, Severity};
+use havespace_core::tree::{RawEntry, Tree, ROOT};
 
 fn file(name: &str, size: u64) -> RawEntry {
     RawEntry { name: name.into(), is_dir: false, size, alloc: size, mtime: 0, flags: 0, file_id: None }

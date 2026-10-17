@@ -12,7 +12,7 @@ const edge = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
 const port = 9335;
 const proc = spawn(edge, [
   "--headless=new", "--use-angle=d3d11", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
-  `--user-data-dir=${mkdtempSync(join(tmpdir(), "disklens-shots-"))}`, "--window-size=1600,980", "about:blank",
+  `--user-data-dir=${mkdtempSync(join(tmpdir(), "havespace-shots-"))}`, "--window-size=1600,980", "about:blank",
 ], { stdio: "ignore" });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -82,6 +82,10 @@ const types = await evaluate("(() => { const b = [...document.querySelectorAll('
 await click(types.x, types.y);
 await sleep(300);
 await shot("types");
+const changes = await evaluate("(() => { const b = [...document.querySelectorAll('.panel-head .segmented button')].find(b => b.innerText === 'Changes'); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+await click(changes.x, changes.y);
+await sleep(300);
+await shot("changes");
 
 // Click a block (zooms into its top-level folder and selects it), then hover a tree-list row.
 await open("");

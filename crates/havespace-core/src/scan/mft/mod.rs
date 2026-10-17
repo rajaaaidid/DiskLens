@@ -257,7 +257,7 @@ mod win {
             stats
         };
         drop(recs);
-        if std::env::var_os("DISKLENS_PROFILE").is_some() {
+        if std::env::var_os("HAVESPACE_PROFILE").is_some() {
             eprintln!(
                 "[profile] mft: {total_records} records ({} MiB) in {extent_count} extents, {readers} readers/{parsers} parsers: read {} ms, read+parse {parse_ms} ms, total {} ms; parsed records {records_mib} MiB; {} orphans, {} extra hard-link names",
                 (total_records * rec_size) >> 20,

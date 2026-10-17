@@ -1,10 +1,10 @@
 //! End-to-end scans of real fixture trees: hard links, junctions, symlinks, access errors, cancel.
 
-use disklens_core::scan::{scan, Method, Progress, ScanOptions};
-use disklens_core::tree::{flags, NodeId, Tree, ROOT};
-use disklens_fixtures::{generate, Fixture};
+use havespace_core::scan::{scan, Method, Progress, ScanOptions};
+use havespace_core::tree::{flags, NodeId, Tree, ROOT};
+use havespace_fixtures::{generate, Fixture};
 
-fn run(root: &std::path::Path, method: Method) -> (Tree, disklens_core::ScanResult) {
+fn run(root: &std::path::Path, method: Method) -> (Tree, havespace_core::ScanResult) {
     let progress = Progress::default();
     let opts = ScanOptions { root: root.to_path_buf(), method, threads: 4 };
     let res = scan(&opts, &progress, None).expect("scan");

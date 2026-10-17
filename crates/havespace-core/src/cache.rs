@@ -1,6 +1,6 @@
 //! Scan cache: the last scan of each drive/folder, so reopening it is instant.
 //!
-//! One file per scanned root in `%LOCALAPPDATA%\DiskLens\cache` (override with `DISKLENS_CACHE_DIR`):
+//! One file per scanned root in `%LOCALAPPDATA%\HaveSpace\cache` (override with `HAVESPACE_CACHE_DIR`):
 //! `DLCACHE1`, a little JSON header ([`CacheMeta`], readable without touching the tree), then the tree
 //! snapshot compressed with LZ4. Writes go to a temp file that is renamed into place, so a crash never
 //! leaves a half-written cache. Only the most recent [`KEEP`] caches are kept.
@@ -35,11 +35,30 @@ pub struct CacheMeta {
 }
 
 pub fn cache_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("DISKLENS_CACHE_DIR") {
+    if let Some(d) = std::env::var_os("HAVESPACE_CACHE_DIR") {
         return PathBuf::from(d);
     }
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("DiskLens").join("cache")
+    static MIGRATE: std::sync::Once = std::sync::Once::new();
+    MIGRATE.call_once(|| {
+        let _ = migrate_from_disklens(&base);
+    });
+    base.join("HaveSpace").join("cache")
+}
+
+/// HaveSpace was called DiskLens up to 0.2.0. Move `<base>\DiskLens\cache` to `<base>\HaveSpace\cache`
+/// so earlier scans still show in *Recent scans* and the Changes tab, unless the new folder already
+/// exists. Removes the old `DiskLens` folder only if nothing else is left in it. Returns whether it moved.
+pub fn migrate_from_disklens(base: &Path) -> io::Result<bool> {
+    let (old_dir, new_dir) = (base.join("DiskLens"), base.join("HaveSpace"));
+    let (old, new) = (old_dir.join("cache"), new_dir.join("cache"));
+    if !old.is_dir() || new.exists() {
+        return Ok(false);
+    }
+    fs::create_dir_all(&new_dir)?;
+    fs::rename(&old, &new)?;
+    let _ = fs::remove_dir(&old_dir);
+    Ok(true)
 }
 
 /// File name for a root: readable prefix plus a hash of the case-folded path.
@@ -84,7 +103,7 @@ fn read_header(f: &mut impl Read) -> io::Result<CacheMeta> {
     let mut magic = [0u8; 8];
     f.read_exact(&mut magic)?;
     if &magic != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a DiskLens cache file"));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "not a HaveSpace cache file"));
     }
     let mut len = [0u8; 4];
     f.read_exact(&mut len)?;
@@ -132,7 +151,7 @@ pub fn remove(root: &str) -> io::Result<()> {
     }
 }
 
-/// Keep only the newest `keep` cache files (these are DiskLens's own files in its own folder).
+/// Keep only the newest `keep` cache files (these are HaveSpace's own files in its own folder).
 fn prune(keep: usize) {
     let Ok(rd) = fs::read_dir(cache_dir()) else { return };
     let mut files: Vec<(std::time::SystemTime, PathBuf)> = rd

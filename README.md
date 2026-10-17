@@ -1,6 +1,8 @@
-# DiskLens
+# HaveSpace
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
+
+HaveSpace was called **DiskLens** up to version 0.2.0.
 
 > **Status:** all six milestones are done: the scanner and CLI, the glass treemap on real scan data, tree list ↔
 > treemap linking with space-hog insights and safe actions, the NTFS MFT fast path (C:, 1.06M files, in
@@ -12,10 +14,10 @@ A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmo
 ## Layout
 
 ```
-crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories,
+crates/havespace-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories,
                           actions, scan cache, scan diff, export
-crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, diff, export, fixture)
-crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
+crates/havespace-cli       `havespace` command-line tool (scan, bench, compare, diff, export, fixture)
+crates/havespace-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
 docs/mockup, docs/screens screenshots, all from the fake C: drive (readme-shots.mjs)
@@ -33,12 +35,12 @@ powershell -ExecutionPolicy Bypass -File scripts\package.ps1
 It produces:
 
 ```
-dist\DiskLens\DiskLens.exe        the app (9.5 MB, interface embedded; needs the WebView2 runtime that ships with Windows 11)
-dist\DiskLens\cli\disklens.exe    the command-line scanner
+dist\HaveSpace\HaveSpace.exe        the app (9.5 MB, interface embedded; needs the WebView2 runtime that ships with Windows 11)
+dist\HaveSpace\cli\havespace.exe    the command-line scanner
 ```
 
-The CLI lives in its own folder because Windows file names are case-insensitive, so `DiskLens.exe` and
-`disklens.exe` can't share one.
+The CLI lives in its own folder because Windows file names are case-insensitive, so `HaveSpace.exe` and
+`havespace.exe` can't share one.
 
 For an NSIS installer, add `-Installer`. That's not verified: the Tauri bundler downloads NSIS from GitHub the
 first time, and the binaries aren't code-signed, so SmartScreen will warn on first launch.
@@ -57,7 +59,7 @@ npm --prefix app/ui run tauri dev -- --release
 
 Command-line options of the app:
 
-- `DiskLens.exe D:\Games` starts scanning that folder or drive immediately.
+- `HaveSpace.exe D:\Games` starts scanning that folder or drive immediately.
 - `--focus <path>` zooms the treemap to a folder once the scan finishes.
 - `--theme light|dark` picks the theme.
 
@@ -101,8 +103,9 @@ edits the fake data.
 
 ### Scan cache: reopen instantly
 
-Every finished scan (not a cancelled one) is saved in the background to `%LOCALAPPDATA%\DiskLens\cache`. It's saved
-again after each Recycle Bin action, so the cache matches what's on disk.
+Every finished scan (not a cancelled one) is saved in the background to `%LOCALAPPDATA%\HaveSpace\cache`. It's saved
+again after each Recycle Bin action, so the cache matches what's on disk. Scans saved by DiskLens (0.2.0 and earlier) in
+`%LOCALAPPDATA%\DiskLens\cache` are moved here the first time HaveSpace starts.
 
 - **Format:** the tree's column arrays plus a small JSON header, compressed with LZ4. Writes go to a temp file
   that's renamed into place, so a crash never leaves a half-written cache. Only the 8 newest scans are kept.
@@ -116,7 +119,7 @@ again after each Recycle Bin action, so the cache matches what's on disk.
 
 ![Changes tab](docs/screens/changes.png)
 
-When a fresh scan finishes, DiskLens compares it with the saved scan of the same drive or folder, *before*
+When a fresh scan finishes, HaveSpace compares it with the saved scan of the same drive or folder, *before*
 replacing that saved scan. The **Changes** tab then shows:
 
 - **Totals:** how much grew, how much was freed, and the net change, with counts of new, gone and changed items.
@@ -125,7 +128,7 @@ replacing that saved scan. The **Changes** tab then shows:
 - **Biggest changes:** files that grew or shrank, plus new or gone files and folders. A whole new folder is one
   entry, not one per file. Click an entry to show it in the treemap; gone items are struck through.
 
-How the comparison works (`crates/disklens-core/src/diff.rs`):
+How the comparison works (`crates/havespace-core/src/diff.rs`):
 
 - Both trees are walked together from the root, matching names case-insensitively. Only logical sizes are compared.
 - **Skipped:** folders that couldn't be read in either scan, junctions and symlinks, and files whose hard-link
@@ -138,11 +141,11 @@ How the comparison works (`crates/disklens-core/src/diff.rs`):
 From the CLI (the saved scan is the one the app writes; `--save` makes this scan the new baseline):
 
 ```bash
-target\release\disklens.exe diff C:\ --top 20
+target\release\havespace.exe diff C:\ --top 20
 ```
 
 ```bash
-target\release\disklens.exe diff D:\Projects --save --json
+target\release\havespace.exe diff D:\Projects --save --json
 ```
 
 `--against <file.dlc>` compares with a specific cache file instead.
@@ -161,11 +164,11 @@ The toolbar's export button exports the **current view**, meaning the folder you
 Export is fast: 673k items take 1 s. From the CLI:
 
 ```bash
-target\release\disklens.exe export C:\Users\me --format csv --out me.csv
+target\release\havespace.exe export C:\Users\me --format csv --out me.csv
 ```
 
 ```bash
-target\release\disklens.exe export D:\ --format json --folders-only --depth 4 --out d.json
+target\release\havespace.exe export D:\ --format json --folders-only --depth 4 --out d.json
 ```
 
 ### Accessibility
@@ -181,14 +184,14 @@ treemap labels sit on a small frosted pill so white text stays readable on light
 ![Confirmation dialog](docs/screens/confirm-recycle.png)
 
 1. **Confirmation every time.** The dialog shows the name, full path, size and file count, and Cancel has the focus.
-2. **Protected locations are refused** (`crates/disklens-core/src/protect.rs`):
+2. **Protected locations are refused** (`crates/havespace-core/src/protect.rs`):
    - **Refused:** drive roots, `C:\Windows`, System Volume Information, `$Recycle.Bin`, the page, hibernation and
      swap files, the Program Files and ProgramData roots, `C:\Users` and profile roots, and `AppData`.
    - **Allowed with a warning in the dialog:** anything inside Program Files, ProgramData or AppData.
 3. **Never a permanent delete.** Left to itself, Windows *permanently* deletes anything it can't recycle (a drive
    without a Recycle Bin, a bin that's switched off, or an item bigger than the bin's limit), and it doesn't say so
    in advance. `tests/recycle.rs` proves it: the shell's `PreDeleteItem` reports identical flags for both cases.
-   DiskLens therefore:
+   HaveSpace therefore:
    - **pre-checks every item** against the volume's Recycle Bin settings (`NukeOnDelete` and `MaxCapacity`, the same
      registry values Explorer uses) and refuses anything that couldn't be recycled;
    - **keeps a tripwire** on the operation: if Windows ever reports a delete that produced no Recycle Bin item, the
@@ -198,7 +201,7 @@ treemap labels sit on a small frosted pill so white text stays readable on light
 The real Recycle Bin tests are ignored by default because they put small fixture files into your bin:
 
 ```bash
-cargo test --release -p disklens-core --test recycle -- --ignored --test-threads=1
+cargo test --release -p havespace-core --test recycle -- --ignored --test-threads=1
 ```
 
 ## Prerequisites
@@ -215,7 +218,7 @@ cargo build --release
 ```
 
 ```bash
-target\release\disklens.exe scan C:\ --top 20
+target\release\havespace.exe scan C:\ --top 20
 ```
 
 Options:
@@ -232,16 +235,16 @@ Ctrl+C cancels a scan cleanly; partial results are still printed.
 Benchmark repeated scans (run 1 is cold-ish, later runs hit the OS cache):
 
 ```bash
-target\release\disklens.exe bench C:\ --runs 3 --method walk
+target\release\havespace.exe bench C:\ --runs 3 --method walk
 ```
 
 Generate a fake tree to scan:
 
 ```bash
-target\release\disklens.exe fixture D:\tmp\fake --files 1000000 --depth 12
+target\release\havespace.exe fixture D:\tmp\fake --files 1000000 --depth 12
 ```
 
-Set `DISKLENS_PROFILE=1` to print the time split between workers and the tree builder.
+Set `HAVESPACE_PROFILE=1` to print the time split between workers and the tree builder.
 
 ### How the walk works
 
@@ -268,7 +271,7 @@ interned to `u16`. That works out to about 53 bytes per node plus the name.
 Inspect one folder of a scan (useful for checking totals):
 
 ```bash
-target\release\disklens.exe scan C:\Users\me --show AppData\Local
+target\release\havespace.exe scan C:\Users\me --show AppData\Local
 ```
 
 ## Benchmarks (this machine)
@@ -385,18 +388,18 @@ Screenshots: `scripts\screenshot.ps1 -Query "theme=light" -Out docs\mockup\light
 Reading the Master File Table requires opening the raw volume (`\\.\C:`), which only an elevated process can do.
 
 - **App:** click *Restart as administrator* on the drive picker, or the "Scan much faster…" hint in the sidebar after
-  a drive scan. DiskLens relaunches through the UAC prompt and rescans the same drive. You can also right-click
-  DiskLens and choose *Run as administrator*.
+  a drive scan. HaveSpace relaunches through the UAC prompt and rescans the same drive. You can also right-click
+  HaveSpace and choose *Run as administrator*.
 - **CLI:** open *Terminal (Admin)*. Scan with the MFT:
 
   ```bash
-  target\release\disklens.exe scan C:\ --method mft
+  target\release\havespace.exe scan C:\ --method mft
   ```
 
   Time the MFT and compare it against the walk, per top-level folder:
 
   ```bash
-  target\release\disklens.exe compare C:\
+  target\release\havespace.exe compare C:\
   ```
 
   Benchmark every NTFS drive and write `docs\bench-mft.txt`:
@@ -409,7 +412,7 @@ Without elevation, `--method auto` (the default) tries the MFT, gets "reading th
 and falls back to the walk. The fallback reason shows in the CLI output and in the app's scan badge tooltip. Folder
 scans always use the walk.
 
-How the MFT path works (`crates/disklens-core/src/scan/mft/`):
+How the MFT path works (`crates/havespace-core/src/scan/mft/`):
 
 1. **Find the MFT.** `FSCTL_GET_NTFS_VOLUME_DATA` gives its location and record size. File record 0 is `$MFT`
    itself; its `$DATA` runlist gives the MFT's own extents on disk.
@@ -425,7 +428,7 @@ How the MFT path works (`crates/disklens-core/src/scan/mft/`):
    - **Hard links:** a file's extra names show in the tree but count zero.
    - **Bad links:** parent references with a stale sequence number (orphans) and directory cycles are skipped.
    - **Junctions and symlinks:** flagged as links, just like in the walk.
-   - **NTFS metafiles** (`$MFT`, `$LogFile`…) appear at the drive root. They use real space, and DiskLens refuses to
+   - **NTFS metafiles** (`$MFT`, `$LogFile`…) appear at the drive root. They use real space, and HaveSpace refuses to
      act on them.
 4. **Fall back to the walk** on anything unexpected: not NTFS, not a whole drive, no admin rights, odd geometry, or an
    MFT so fragmented that its own extents continue in an attribute list.
