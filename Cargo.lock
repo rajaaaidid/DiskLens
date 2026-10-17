@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "disklens-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "disklens-core",
  "serde",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "disklens-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "disklens-core",
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "disklens-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossbeam-channel",
  "disklens-fixtures",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "disklens-fixtures"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "dispatch2"

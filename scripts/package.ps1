@@ -25,5 +25,6 @@ New-Item -ItemType Directory -Force "$dist\cli" | Out-Null
 Copy-Item "$root\target\release\disklens-app.exe" "$dist\DiskLens.exe"
 Copy-Item "$root\target\release\disklens.exe" "$dist\cli\disklens.exe"
 Copy-Item "$root\README.md" "$dist\README.md"
+Copy-Item "$root\LICENSE" "$dist\LICENSE"
 Get-ChildItem $dist -Recurse -File | Select-Object @{n='File';e={$_.FullName.Substring($dist.Length + 1)}}, @{n='MB';e={[math]::Round($_.Length / 1MB, 1)}}
 if ($Installer) { Get-ChildItem "$root\target\release\bundle" -Recurse -Include *.exe, *.msi | Select-Object FullName }
