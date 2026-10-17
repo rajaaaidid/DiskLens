@@ -419,7 +419,7 @@ export default function App() {
           onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           subtitle={target ? `${target} · ${formatBytes(summary?.size ?? progress?.bytes ?? 0)}${scanning ? " scanned so far" : ""}` : ""}
           notice={
-            backend.native ? undefined : (
+            backend.native || params.has("shots") ? undefined : (
               <>
                 Demo data: a browser can't read your disk. Run the DiskLens app (<code>npm run tauri dev</code>) to scan your drives.
               </>

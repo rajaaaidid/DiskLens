@@ -194,7 +194,7 @@ export const mockBackend: Backend = {
     return out;
   },
   findPath: async (_g, path) => mockFindId(path.replace(/^C:\\/i, "").split("\\").join("/")) ?? null,
-  pickFolder: async () => "C:\\Users\\Aidid",
+  pickFolder: async () => "C:\\Users\\Alex",
   launchOptions: async () => ({ scan: params.has("picker") ? null : "C:\\", focus: null, theme: null }),
   onProgress: (cb) => (listeners.progress.add(cb), () => listeners.progress.delete(cb)),
   onDone: (cb) => (listeners.done.add(cb), () => listeners.done.delete(cb)),

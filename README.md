@@ -18,7 +18,7 @@ crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, ex
 crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
-docs/mockup, docs/screens screenshots (fake-data mockup / real app)
+docs/mockup, docs/screens screenshots, all from the fake C: drive (readme-shots.mjs)
 scripts                   screenshots, window capture, UI benchmark and the end-to-end UI flow (ui-flow.mjs)
 ```
 
@@ -337,11 +337,12 @@ npm --prefix app/ui run dev
 Open http://localhost:1420. URL parameters for design review:
 
 - `?theme=light`
-- `?zoom=Users/Aidid`
+- `?zoom=Users/Alex`
 - `?hover=pagefile.sys` (pins the hover state)
 - `?stress=60000&fps` (stress test with an FPS overlay)
 
-Screenshots: `scripts\screenshot.ps1 -Query "theme=light" -Out docs\mockup\light.png`.
+Screenshots: `scripts\screenshot.ps1 -Query "theme=light" -Out docs\mockup\light.png`. `node scripts/readme-shots.mjs` recaptures every image in
+`docs/screens` and `docs/mockup` from the fake drive (`?shots` hides the demo-data notice).
 
 ## Running as administrator (MFT fast path)
 
