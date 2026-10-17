@@ -42,7 +42,7 @@ for (const [theme, sel, aurora] of [
   const t = { ...tokens(":root"), ...(theme === "light" ? tokens(sel) : {}) };
   console.log(`\n${theme} theme (worst case over the aurora)`);
   for (const panel of ["glass", "glass-strong"]) {
-    for (const text of ["text", "text-2", "text-3"]) {
+    for (const text of ["text", "text-2", "text-3", "grow", "shrink"]) {
       let worst = Infinity;
       for (const a of aurora) {
         const bg = over(t[panel], a);
@@ -51,7 +51,8 @@ for (const [theme, sel, aurora] of [
           worst = Math.min(worst, ratio(over(t[text], surface), surface));
         }
       }
-      // text-3 is used for small secondary labels: hold it to 4.5 like body text.
+      // text-3 is used for small secondary labels: hold it to 4.5 like body text. grow/shrink colour the
+      // size changes in the Changes tab.
       const ok = worst >= 4.5;
       if (!ok) failures++;
       console.log(`  --${text.padEnd(7)} on --${panel.padEnd(12)} ${worst.toFixed(2)}:1 ${ok ? "AA" : "FAILS AA (4.5:1)"}`);

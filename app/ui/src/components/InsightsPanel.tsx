@@ -1,10 +1,12 @@
 import { useState } from "react";
-import type { Hog, ScanSummary } from "../api";
+import type { Change, Hog, ScanSummary } from "../api";
 import { CATEGORY_LABELS, categoryForName, cssColor } from "../data/categories";
-import { formatBytes, formatCount, formatPercent } from "../data/format";
+import { formatAgo, formatBytes, formatCount, formatPercent } from "../data/format";
 import { IconExternal } from "./Icons";
 
-type Tab = "hogs" | "files" | "folders" | "types";
+type Tab = "hogs" | "files" | "folders" | "types" | "changes";
+
+const TAB_LABELS: Record<Tab, string> = { hogs: "Hogs", files: "Files", folders: "Folders", types: "Types", changes: "Changes" };
 
 interface Props {
   summary: ScanSummary | null;
@@ -22,6 +24,13 @@ function splitPath(p: string) {
 
 /** Hog rules whose matches are files; all others match folders. */
 const FILE_HOGS = new Set(["hiberfil", "pagefile", "vhdx"]);
+
+/** "+1.2 GB" / "−300 MB" (a real minus sign). */
+function formatDelta(delta: number) {
+  return `${delta < 0 ? "\u2212" : "+"}${formatBytes(Math.abs(delta))}`;
+}
+
+const CHANGE_TAG: Record<Change["kind"], string> = { added: "new", removed: "gone", grew: "grew", shrank: "shrank" };
 
 const SEVERITY_LABEL: Record<Hog["severity"], string> = { reclaimable: "Reclaimable", system: "Windows-managed", info: "Good to know" };
 
@@ -64,14 +73,47 @@ export function InsightsPanel({ summary, scanning, onReveal, onOpenInExplorer, o
     );
   };
 
+  const changeRow = (c: Change, rank: number) => {
+    const { name, dir } = splitPath(c.path);
+    const cat = c.isDir ? "folder" : categoryForName(name);
+    const node = c.node;
+    const sizes = c.kind === "added" ? `Now ${formatBytes(c.after)}` : c.kind === "removed" ? `Was ${formatBytes(c.before)}` : `${formatBytes(c.before)} \u2192 ${formatBytes(c.after)}`;
+    const hint = node === null ? "No longer on disk" : "Click to show in the treemap · right-click for actions";
+    return (
+      <li
+        key={c.path}
+        className={node === null ? "gone" : undefined}
+        onClick={node === null ? undefined : () => onReveal(c.path)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (node !== null) onItemMenu(node, name, c.isDir, e.clientX, e.clientY);
+        }}
+        title={`${c.path}\n${sizes}\n${hint}`}
+      >
+        <span className="rank">{rank}</span>
+        <span className="swatch" style={{ background: cssColor(cat, c.isDir ? 0.7 : 0.85) }} />
+        <span className="file-main">
+          <span className="file-name">{name}</span>
+          <span className="file-path">
+            {(c.kind === "added" || c.kind === "removed") && <span className={`change-tag ${c.kind}`}>{CHANGE_TAG[c.kind]}</span>}
+            {dir}
+          </span>
+        </span>
+        <span className={`file-size delta ${c.delta < 0 ? "down" : "up"}`}>{formatDelta(c.delta)}</span>
+      </li>
+    );
+  };
+
+  const changes = summary?.changes;
+
   return (
     <aside className="insights glass">
       <div className="panel-head">
         <h2>Insights</h2>
         <div className="segmented" role="tablist">
-          {(["hogs", "files", "folders", "types"] as Tab[]).map((t) => (
+          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? "on" : ""} onClick={() => setTab(t)}>
-              {t === "hogs" ? "Hogs" : t === "files" ? "Files" : t === "folders" ? "Folders" : "Types"}
+              {TAB_LABELS[t]}
             </button>
           ))}
         </div>
@@ -116,6 +158,54 @@ export function InsightsPanel({ summary, scanning, onReveal, onOpenInExplorer, o
           <>
             <p className="tab-note">Folders holding the most data in their own files (not counting subfolders).</p>
             <ol className="file-rank">{summary.largestFolders.map((f, i) => itemRow(f.node, f.path, f.size, true, i + 1))}</ol>
+          </>
+        )}
+
+        {summary && tab === "changes" && !changes && (
+          <p className="empty-note">
+            {summary.fromCache
+              ? "This is a saved scan. Rescan to see what changed since then."
+              : summary.cancelled
+                ? "The scan was cancelled, so there's nothing to compare."
+                : `Nothing to compare with yet. The next scan of ${summary.root} will show what changed since this one.`}
+          </p>
+        )}
+        {summary && tab === "changes" && changes && (
+          <>
+            <div className="change-summary">
+              <p className="change-since">Since the scan {formatAgo(changes.sinceMs)}</p>
+              <div className="change-stats">
+                <div>
+                  <span className="stat-label">Grew</span>
+                  <span className="delta up">{formatDelta(changes.grew)}</span>
+                  <span className="stat-sub">
+                    {formatCount(changes.added)} new · {formatCount(changes.changed)} changed
+                  </span>
+                </div>
+                <div>
+                  <span className="stat-label">Freed</span>
+                  <span className="delta down">{formatDelta(-changes.shrank)}</span>
+                  <span className="stat-sub">{formatCount(changes.removed)} gone</span>
+                </div>
+                <div>
+                  <span className="stat-label">Net</span>
+                  <span className={`delta ${changes.after < changes.before ? "down" : "up"}`}>{formatDelta(changes.after - changes.before)}</span>
+                  <span className="stat-sub">now {formatBytes(changes.after)}</span>
+                </div>
+              </div>
+              {changes.methodDiffers && <p className="tab-note">The earlier scan used a different method (MFT vs folder walk), so small differences are expected.</p>}
+            </div>
+            {changes.items.length === 0 ? (
+              <p className="empty-note">Nothing changed.</p>
+            ) : (
+              <>
+                <div className="section-label">Folders that changed most</div>
+                <p className="tab-note">Counting only what changed directly inside each folder.</p>
+                <ol className="file-rank">{changes.folders.map((c, i) => changeRow(c, i + 1))}</ol>
+                <div className="section-label">Biggest changes</div>
+                <ol className="file-rank">{changes.items.map((c, i) => changeRow(c, i + 1))}</ol>
+              </>
+            )}
           </>
         )}
 

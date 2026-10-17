@@ -6,7 +6,7 @@ import { FAKE_DRIVES, FAKE_ROOT, makeStressTree, pathOf } from "../data/fakeTree
 import { categoryTotals, extensionTotals, findHogs, largestFiles } from "../data/insights";
 import type { TreeNode } from "../data/types";
 import { layoutTreemap } from "../treemap/layout";
-import { BF_AGGREGATE, BF_DIR, type Backend, type Layout, type Protection, type Row, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
+import { BF_AGGREGATE, BF_DIR, type Backend, type Change, type Layout, type Protection, type Row, type ScanChanges, type ScanProgress, type ScanSummary, type ViewBlock } from "./types";
 
 const params = new URLSearchParams(location.search);
 const ROOT: TreeNode = params.get("stress") ? makeStressTree(Number(params.get("stress"))) : FAKE_ROOT;
@@ -29,6 +29,60 @@ let timer: number | undefined;
 
 function catId(c: string) {
   return Math.max(0, CATEGORY_BY_ID.indexOf(c as never));
+}
+
+/**
+ * Plausible "since the last scan" changes over the fake tree, for the Changes tab: a new download, a
+ * virtual disk and a few files that grew, one that shrank, and a backup that is gone.
+ */
+function mockChanges(): ScanChanges | null {
+  if (ROOT !== FAKE_ROOT) return null;
+  const files = largestFiles(ROOT, 300);
+  const pickFile = (re: RegExp, skip: TreeNode[]) => files.find((f) => re.test(pathOf(f)) && !skip.includes(f));
+  const used: TreeNode[] = [];
+  const raw: { node: TreeNode | null; parent: TreeNode; path: string; kind: Change["kind"]; before: number; after: number }[] = [];
+  const add = (re: RegExp, kind: Change["kind"], factor: number) => {
+    const f = pickFile(re, used);
+    if (!f?.parent) return;
+    used.push(f);
+    const before = kind === "added" ? 0 : Math.round(kind === "grew" ? f.size / factor : f.size * factor);
+    raw.push({ node: f, parent: f.parent, path: pathOf(f), kind, before, after: f.size });
+  };
+  add(/\\downloads\\/i, "added", 1);
+  add(/\.vhdx$/i, "grew", 1.6);
+  add(/\\downloads\\/i, "added", 1);
+  add(/\\appdata\\/i, "grew", 1.3);
+  add(/\\videos\\/i, "shrank", 1.8);
+  add(/\\documents\\/i, "grew", 1.15);
+  const dl = byId.get(mockFindId("Users/Alex/Downloads") ?? -1);
+  if (dl) raw.push({ node: null, parent: dl, path: `${pathOf(dl)}\\old-backup.zip`, kind: "removed", before: 3.2 * 1024 ** 3, after: 0 });
+
+  const toChange = (r: (typeof raw)[number]): Change => ({ path: r.path, kind: r.kind, isDir: false, before: r.before, after: r.after, delta: r.after - r.before, node: r.node ? idOf(r.node) : null });
+  const items = raw.map(toChange).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const byFolder = new Map<TreeNode, number>();
+  raw.forEach((r) => byFolder.set(r.parent, (byFolder.get(r.parent) ?? 0) + r.after - r.before));
+  const folders = [...byFolder]
+    .filter(([, delta]) => delta !== 0)
+    .map(([n, delta]): Change => ({ path: pathOf(n), kind: delta > 0 ? "grew" : "shrank", isDir: true, before: n.size - delta, after: n.size, delta, node: idOf(n) }))
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+  const grew = items.reduce((s, c) => s + Math.max(0, c.delta), 0);
+  const shrank = items.reduce((s, c) => s + Math.max(0, -c.delta), 0);
+  const count = (k: Change["kind"]) => items.filter((c) => c.kind === k).length;
+  return {
+    sinceMs: Date.now() - 3 * 86_400_000,
+    methodDiffers: false,
+    before: ROOT.size - grew + shrank,
+    after: ROOT.size,
+    filesBefore: ROOT.files - count("added") + count("removed"),
+    filesAfter: ROOT.files,
+    grew,
+    shrank,
+    added: count("added"),
+    removed: count("removed"),
+    changed: count("grew") + count("shrank"),
+    items,
+    folders,
+  };
 }
 
 function summary(): ScanSummary {
@@ -64,6 +118,7 @@ function summary(): ScanSummary {
       count: 1,
       items: [{ node: idOf(h.node), path: pathOf(h.node), size: h.node.size }],
     })),
+    changes: mockChanges(),
   };
 }
 
@@ -238,7 +293,7 @@ export const mockBackend: Backend = {
     generation++;
     const g = generation;
     setTimeout(() => {
-      const s = { ...summary(), generation: g, fromCache: true, scannedAtMs: Date.now() - 2 * 3600_000 };
+      const s = { ...summary(), generation: g, fromCache: true, scannedAtMs: Date.now() - 2 * 3600_000, changes: null };
       listeners.done.forEach((cb) => cb(s));
     }, 0);
     return g;
