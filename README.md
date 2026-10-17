@@ -397,3 +397,7 @@ How the MFT path works (`crates/disklens-core/src/scan/mft/`):
 `tests/mft.rs` builds byte-exact FILE records, with fixups, resident and non-resident `$DATA`, sparse streams,
 extension records, DOS names, reparse points, orphans and cycles, and checks the parser and the tree builder
 against them.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
