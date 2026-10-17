@@ -15,7 +15,7 @@ export function TitleBar({ theme, onToggleTheme, subtitle, notice }: Props) {
     <header className="titlebar" data-tauri-drag-region onDoubleClick={() => backend.windowControl("maximize")}>
       <div className="titlebar-brand" data-tauri-drag-region>
         <IconLens />
-        <span className="brand-name" data-tauri-drag-region>DiskLens</span>
+        <span className="brand-name" data-tauri-drag-region>HaveSpace</span>
         {subtitle && <span className="brand-sub" data-tauri-drag-region>{subtitle}</span>}
       </div>
       {notice && (

@@ -1,7 +1,7 @@
-use disklens_core::cache::{self, CacheMeta};
-use disklens_core::export::{export, iso8601, Format, Options};
-use disklens_core::scan::{Inaccessible, Method};
-use disklens_core::tree::{flags, RawEntry, Tree, ROOT};
+use havespace_core::cache::{self, CacheMeta};
+use havespace_core::export::{export, iso8601, Format, Options};
+use havespace_core::scan::{Inaccessible, Method};
+use havespace_core::tree::{flags, RawEntry, Tree, ROOT};
 
 fn file(name: &str, size: u64, mtime: u64) -> RawEntry {
     RawEntry { name: name.into(), is_dir: false, size, alloc: size.div_ceil(4096) * 4096, mtime, flags: 0, file_id: None }
@@ -45,8 +45,8 @@ fn snapshot_round_trips_exactly() {
 
 #[test]
 fn cache_saves_lists_and_loads() {
-    let dir = std::env::temp_dir().join(format!("disklens-cache-test-{}", std::process::id()));
-    std::env::set_var("DISKLENS_CACHE_DIR", &dir);
+    let dir = std::env::temp_dir().join(format!("havespace-cache-test-{}", std::process::id()));
+    std::env::set_var("HAVESPACE_CACHE_DIR", &dir);
     let t = sample();
     let meta = CacheMeta {
         root: "C:\\".into(),
@@ -69,6 +69,26 @@ fn cache_saves_lists_and_loads() {
     cache::remove("C:\\").unwrap();
     assert!(cache::list().is_empty());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn disklens_cache_moves_to_havespace_once() {
+    let base = std::env::temp_dir().join(format!("havespace-migrate-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let old = base.join("DiskLens").join("cache");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("c_-0123.dlc"), b"scan").unwrap();
+
+    assert!(cache::migrate_from_disklens(&base).unwrap());
+    assert_eq!(std::fs::read(base.join("HaveSpace").join("cache").join("c_-0123.dlc")).unwrap(), b"scan");
+    assert!(!base.join("DiskLens").exists(), "empty old folder is removed");
+
+    // Already migrated, or a new install with nothing to move: leave everything alone.
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::write(old.join("other.dlc"), b"x").unwrap();
+    assert!(!cache::migrate_from_disklens(&base).unwrap());
+    assert!(old.join("other.dlc").exists());
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]

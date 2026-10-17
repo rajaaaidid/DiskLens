@@ -1,4 +1,4 @@
-//! Which paths DiskLens refuses to send to the Recycle Bin, and which get an extra warning.
+//! Which paths HaveSpace refuses to send to the Recycle Bin, and which get an extra warning.
 //!
 //! This is a safety net on top of the confirmation dialog: deleting these by hand breaks Windows or
 //! apps, and the right way to reclaim their space is a Windows setting or an uninstaller.
@@ -26,7 +26,7 @@ pub fn protection(path: &str) -> Protection {
     let Some(first) = c.first() else { return Protection::Blocked("Not a valid path.") };
     if !(first.len() == 2 && first.ends_with(':')) {
         // UNC / network paths: allowed, but network shares usually have no Recycle Bin.
-        return Protection::Warn("Network locations often have no Recycle Bin. DiskLens will refuse if the item can't be recycled.");
+        return Protection::Warn("Network locations often have no Recycle Bin. HaveSpace will refuse if the item can't be recycled.");
     }
     if c.len() == 1 {
         return Protection::Blocked("This is the root of a drive.");

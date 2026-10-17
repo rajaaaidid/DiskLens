@@ -232,7 +232,7 @@ const SPEC: Spec = d(
       d("Pictures", d("Camera Roll", gen("IMG", ["jpg", "heic", "png"], 2600, 3.2 * MB, { fanout: 6 })), d("Screenshots", gen("Screenshot", ["png"], 1400, 1.1 * MB)), d("RAW", gen("DSC", ["cr2", "nef"], 700, 26 * MB, { fanout: 4 }))),
       d("Music", gen("track", ["flac", "mp3"], 1500, 9 * MB, { fanout: 8 })),
       d("Downloads", gen("download", ["zip", "exe", "msi", "iso", "pdf", "mp4", "7z", "png"], 260, 14 * MB, { spread: 1.7 })),
-      d("Documents", gen("doc", ["docx", "pdf", "xlsx", "pptx", "txt"], 900, 900 * KB, { fanout: 6 }), d("Projects", project("disklens"), project("space-miner"), project("web-portfolio"))),
+      d("Documents", gen("doc", ["docx", "pdf", "xlsx", "pptx", "txt"], 900, 900 * KB, { fanout: 6 }), d("Projects", project("havespace"), project("space-miner"), project("web-portfolio"))),
       d("OneDrive", gen("sync", ["docx", "pdf", "jpg", "xlsx"], 800, 1.6 * MB, { fanout: 5 })),
       d(
         "AppData",

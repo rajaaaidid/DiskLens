@@ -52,7 +52,7 @@ export function ConfirmRecycle({ info, onCancel, onConfirm }: Props) {
             </div>
           </div>
           {info.protection.kind === "warn" && <p className="confirm-warn">{info.protection.reason}</p>}
-          <p className="confirm-note">You can restore it from the Recycle Bin. DiskLens never deletes permanently: if Windows can't recycle it, nothing is removed.</p>
+          <p className="confirm-note">You can restore it from the Recycle Bin. HaveSpace never deletes permanently: if Windows can't recycle it, nothing is removed.</p>
         </div>
         <div className="modal-actions">
           <button ref={cancelRef} className="btn btn-secondary" onClick={onCancel} disabled={busy}>

@@ -1,9 +1,9 @@
-# Capture a top-level window (default: DiskLens) to PNG with PrintWindow(PW_RENDERFULLCONTENT),
+# Capture a top-level window (default: HaveSpace) to PNG with PrintWindow(PW_RENDERFULLCONTENT),
 # which includes GPU/WebView2 content even when the window is partly covered.
-# Usage: scripts\capture-window.ps1 -Out docs\screens\app.png [-Title DiskLens]
+# Usage: scripts\capture-window.ps1 -Out docs\screens\app.png [-Title HaveSpace]
 param(
   [Parameter(Mandatory = $true)][string]$Out,
-  [string]$Title = "DiskLens"
+  [string]$Title = "HaveSpace"
 )
 Add-Type -AssemblyName System.Drawing
 Add-Type @"

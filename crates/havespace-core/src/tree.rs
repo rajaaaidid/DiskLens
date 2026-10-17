@@ -19,7 +19,7 @@ pub mod flags {
     pub const INACCESSIBLE: u8 = 1 << 2;
     /// Extra name of an already-counted hard-linked file; contributes 0 bytes.
     pub const HARDLINK_DUP: u8 = 1 << 3;
-    /// Sent to the Recycle Bin from DiskLens; excluded from totals.
+    /// Sent to the Recycle Bin from HaveSpace; excluded from totals.
     pub const DELETED: u8 = 1 << 4;
     /// Folder enumeration has finished (for streaming partial results).
     pub const SCANNED: u8 = 1 << 5;
@@ -390,7 +390,7 @@ impl Tree {
     pub fn from_bytes(b: &[u8]) -> std::io::Result<Tree> {
         let mut r = Reader { b, pos: 0 };
         if r.take(8)? != SNAPSHOT_MAGIC {
-            return Err(bad("not a DiskLens tree snapshot"));
+            return Err(bad("not a HaveSpace tree snapshot"));
         }
         let n = r.u32()? as usize;
         if n == 0 || n > b.len() {

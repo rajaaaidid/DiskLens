@@ -1,4 +1,4 @@
-//! DiskLens desktop shell: owns the scan session and exposes it to the UI.
+//! HaveSpace desktop shell: owns the scan session and exposes it to the UI.
 //!
 //! Scans run on a background thread writing into a shared `RwLock<Tree>`; a ticker emits
 //! `scan-progress` events, and the UI pulls fresh treemap layouts (binary) while the scan runs, so the
@@ -10,17 +10,17 @@ mod system;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use disklens_core::actions::{self, RecycleItem};
-use disklens_core::cache::{self, CacheMeta};
-use disklens_core::diff::{diff, ScanDiff};
-use disklens_core::export;
-use disklens_core::analysis::{extension_totals, largest_files, largest_folders, ExtTotal, Ranked};
-use disklens_core::hogs::{find_hogs, Hog};
-use disklens_core::protect::{protection, Protection};
-use disklens_core::category::{category_of, category_totals, dominant_categories, ext_categories, CategoryTotal};
-use disklens_core::layout::{layout, LayoutOptions};
-use disklens_core::scan::{scan, Inaccessible, Method, Progress, ScanOptions};
-use disklens_core::tree::{flags, NodeId, Tree, NONE};
+use havespace_core::actions::{self, RecycleItem};
+use havespace_core::cache::{self, CacheMeta};
+use havespace_core::diff::{diff, ScanDiff};
+use havespace_core::export;
+use havespace_core::analysis::{extension_totals, largest_files, largest_folders, ExtTotal, Ranked};
+use havespace_core::hogs::{find_hogs, Hog};
+use havespace_core::protect::{protection, Protection};
+use havespace_core::category::{category_of, category_totals, dominant_categories, ext_categories, CategoryTotal};
+use havespace_core::layout::{layout, LayoutOptions};
+use havespace_core::scan::{scan, Inaccessible, Method, Progress, ScanOptions};
+use havespace_core::tree::{flags, NodeId, Tree, NONE};
 use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
@@ -215,7 +215,7 @@ fn is_elevated() -> bool {
     system::is_elevated()
 }
 
-/// Restart DiskLens as administrator (UAC prompt) so drive scans can read the MFT directly. `scan` is
+/// Restart HaveSpace as administrator (UAC prompt) so drive scans can read the MFT directly. `scan` is
 /// passed on so the elevated instance starts scanning the same place. Exits this instance on success.
 #[tauri::command]
 fn restart_as_admin(app: AppHandle, scan: Option<String>, theme: Option<String>) -> Result<(), String> {
@@ -242,7 +242,7 @@ fn restart_as_admin(app: AppHandle, scan: Option<String>, theme: Option<String>)
 #[tauri::command]
 fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: Option<String>) -> Result<u64, String> {
     let method: Method = method.as_deref().unwrap_or("auto").parse()?;
-    let root_name = disklens_core::scan::root_display_name(std::path::Path::new(&path));
+    let root_name = havespace_core::scan::root_display_name(std::path::Path::new(&path));
     let (tree, progress, generation) = {
         let mut s = state.0.lock().unwrap();
         s.progress.cancel();
@@ -516,7 +516,7 @@ async fn ancestors(state: State<'_, AppState>, generation: u64, id: NodeId) -> R
 
 #[derive(Serialize, Default)]
 struct LaunchOptions {
-    /// Folder to scan right away (first positional argument, or `DISKLENS_SCAN`).
+    /// Folder to scan right away (first positional argument, or `HAVESPACE_SCAN`).
     scan: Option<String>,
     /// After the scan, zoom the treemap to this folder (`--focus <path>`).
     focus: Option<String>,
@@ -524,7 +524,7 @@ struct LaunchOptions {
     theme: Option<String>,
 }
 
-/// Command-line options: `DiskLens.exe [folder] [--focus <path>] [--theme light|dark]`.
+/// Command-line options: `HaveSpace.exe [folder] [--focus <path>] [--theme light|dark]`.
 #[tauri::command]
 fn launch_options() -> LaunchOptions {
     let mut o = LaunchOptions::default();
@@ -538,7 +538,7 @@ fn launch_options() -> LaunchOptions {
         }
     }
     if o.scan.is_none() {
-        o.scan = std::env::var("DISKLENS_SCAN").ok().filter(|p| std::path::Path::new(p).is_dir());
+        o.scan = std::env::var("HAVESPACE_SCAN").ok().filter(|p| std::path::Path::new(p).is_dir());
     }
     o
 }
@@ -842,5 +842,5 @@ pub fn run() {
             set_backdrop
         ])
         .run(tauri::generate_context!())
-        .expect("error while running DiskLens");
+        .expect("error while running HaveSpace");
 }

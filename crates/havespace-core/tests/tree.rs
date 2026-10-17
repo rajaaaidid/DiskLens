@@ -1,6 +1,6 @@
 //! Size aggregation in the arena tree.
 
-use disklens_core::tree::{flags, RawEntry, Tree, ROOT};
+use havespace_core::tree::{flags, RawEntry, Tree, ROOT};
 
 fn file(name: &str, size: u64) -> RawEntry {
     RawEntry { name: name.into(), is_dir: false, size, alloc: size.div_ceil(4096) * 4096, mtime: 0, flags: 0, file_id: None }

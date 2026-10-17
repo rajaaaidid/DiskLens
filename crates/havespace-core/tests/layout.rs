@@ -1,7 +1,7 @@
 //! Treemap layout properties.
 
-use disklens_core::layout::{hit_test, layout, squarify, Block, LayoutOptions, Rect};
-use disklens_core::tree::{RawEntry, Tree, ROOT};
+use havespace_core::layout::{hit_test, layout, squarify, Block, LayoutOptions, Rect};
+use havespace_core::tree::{RawEntry, Tree, ROOT};
 
 const EPS: f32 = 0.05;
 

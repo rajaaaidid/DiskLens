@@ -65,7 +65,7 @@ pub(crate) fn parallel_walk(root: &Path, strategy: Strategy, threads: usize, pro
     let level = Arc::new(Level::new(strategy));
     let (task_tx, task_rx) = unbounded::<Task>();
     let (msg_tx, msg_rx) = unbounded::<Msg>();
-    let profile = std::env::var_os("DISKLENS_PROFILE").is_some();
+    let profile = std::env::var_os("HAVESPACE_PROFILE").is_some();
     let enum_ns = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
     let workers: Vec<_> = (0..threads)

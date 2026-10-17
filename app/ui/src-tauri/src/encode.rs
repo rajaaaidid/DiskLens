@@ -18,9 +18,9 @@
 //!
 //! Then the names, UTF-8, one per block, separated by NUL (empty for aggregates).
 
-use disklens_core::category::{category_of, Category};
-use disklens_core::layout::Block;
-use disklens_core::tree::{flags, NodeId, Tree};
+use havespace_core::category::{category_of, Category};
+use havespace_core::layout::Block;
+use havespace_core::tree::{flags, NodeId, Tree};
 
 pub const BLOCK_BYTES: usize = 48;
 pub const BF_AGGREGATE: u8 = 1;

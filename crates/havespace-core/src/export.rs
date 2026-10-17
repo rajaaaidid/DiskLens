@@ -140,7 +140,7 @@ fn json_str(s: &str) -> String {
 
 fn export_json(t: &Tree, o: Options, w: &mut impl Write) -> io::Result<Stats> {
     let mut stats = Stats::default();
-    write!(w, "{{\"tool\":\"DiskLens {}\",\"root\":{},\"tree\":", env!("CARGO_PKG_VERSION"), json_str(&t.path(o.root)))?;
+    write!(w, "{{\"tool\":\"HaveSpace {}\",\"root\":{},\"tree\":", env!("CARGO_PKG_VERSION"), json_str(&t.path(o.root)))?;
     // Iterative pre-order with explicit closing, so deep trees can't overflow the stack.
     enum Step {
         Open(NodeId, u32, bool),

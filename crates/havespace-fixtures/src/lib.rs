@@ -1,4 +1,4 @@
-//! Fake directory trees for DiskLens tests and benchmarks.
+//! Fake directory trees for HaveSpace tests and benchmarks.
 //!
 //! [`Fixture`] builds a small hand-specified tree (files with exact sizes, hard links, junctions,
 //! symlinks) in a temp folder and deletes it on drop. [`generate`] builds a large pseudo-random tree
@@ -21,7 +21,7 @@ impl Fixture {
     /// Create an empty fixture folder under the system temp dir.
     pub fn new(name: &str) -> io::Result<Self> {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!("disklens-fx-{}-{}-{}", name, std::process::id(), n));
+        let root = std::env::temp_dir().join(format!("havespace-fx-{}-{}-{}", name, std::process::id(), n));
         if root.exists() {
             fs::remove_dir_all(&root)?;
         }

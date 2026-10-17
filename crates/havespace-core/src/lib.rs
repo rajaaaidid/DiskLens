@@ -1,4 +1,4 @@
-//! DiskLens scanner engine.
+//! HaveSpace scanner engine.
 //!
 //! - [`tree`]: compact arena of the scanned file system (struct-of-arrays, interned names).
 //! - [`scan`]: parallel directory walk and NTFS MFT fast path, with live progress and cancel.

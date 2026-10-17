@@ -1,20 +1,20 @@
-//! `disklens` command-line front end.
+//! `havespace` command-line front end.
 //!
-//!   disklens scan C:\ --top 20 [--method auto|walk|findfirst|mft] [--threads N] [--json]
-//!   disklens bench C:\ --runs 3 [--method walk]
-//!   disklens diff C:\ [--top 20] [--save] [--against old.dlc] [--json]
-//!   disklens fixture D:\tmp\fake --files 1000000 --depth 12
+//!   havespace scan C:\ --top 20 [--method auto|walk|findfirst|mft] [--threads N] [--json]
+//!   havespace bench C:\ --runs 3 [--method walk]
+//!   havespace diff C:\ [--top 20] [--save] [--against old.dlc] [--json]
+//!   havespace fixture D:\tmp\fake --files 1000000 --depth 12
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
-use disklens_core::analysis::{extension_totals, largest_files, largest_folders};
-use disklens_core::{format_bytes, scan, Method, Progress, ScanOptions};
+use havespace_core::analysis::{extension_totals, largest_files, largest_folders};
+use havespace_core::{format_bytes, scan, Method, Progress, ScanOptions};
 
 #[derive(Parser)]
-#[command(name = "disklens", version, about = "Fast disk space analyzer (scanner engine CLI)")]
+#[command(name = "havespace", version, about = "Fast disk space analyzer (scanner engine CLI)")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -60,7 +60,7 @@ enum Cmd {
     Export {
         path: PathBuf,
         #[arg(long, default_value = "csv")]
-        format: disklens_core::export::Format,
+        format: havespace_core::export::Format,
         /// Output file (default: stdout).
         #[arg(long)]
         out: Option<PathBuf>,
@@ -117,7 +117,7 @@ fn main() {
         Cmd::Diff { path, top, against, save, method, json } => run_diff(path, top, against, save, method, json),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
-            match disklens_fixtures::generate(&path, files, depth, max_file, seed) {
+            match havespace_fixtures::generate(&path, files, depth, max_file, seed) {
                 Ok(s) => {
                     println!("created {} files in {} folders, {} logical, in {:.1}s", s.files, s.dirs, format_bytes(s.bytes), t.elapsed().as_secs_f64());
                     0
@@ -188,7 +188,7 @@ fn run_scan(path: PathBuf, top: usize, method: Method, threads: usize, json: boo
                 }
             }
         }
-        use disklens_core::tree::flags as f;
+        use havespace_core::tree::flags as f;
         println!("{}  {}  {} files  {} folders  flags {:#04x}", tree.path(cur), format_bytes(tree.size[cur as usize]), tree.files[cur as usize], tree.dirs[cur as usize], tree.flags[cur as usize]);
         let mut kids: Vec<_> = tree.children(cur).collect();
         kids.sort_by_key(|&c| std::cmp::Reverse(tree.size[c as usize]));
@@ -232,7 +232,7 @@ fn run_scan(path: PathBuf, top: usize, method: Method, threads: usize, json: boo
         return 0;
     }
 
-    println!("DiskLens scan of {}", tree.path(0));
+    println!("HaveSpace scan of {}", tree.path(0));
     println!(
         "  method        {:?}{}",
         res.method,
@@ -301,7 +301,7 @@ fn run_bench(path: PathBuf, runs: usize, method: Method, threads: usize) -> i32 
     0
 }
 
-fn run_export(path: PathBuf, format: disklens_core::export::Format, out: Option<PathBuf>, folders_only: bool, depth: Option<u32>, method: Method) -> i32 {
+fn run_export(path: PathBuf, format: havespace_core::export::Format, out: Option<PathBuf>, folders_only: bool, depth: Option<u32>, method: Method) -> i32 {
     use std::io::Write;
     let progress = Progress::default();
     let res = match scan(&ScanOptions { root: path, method, threads: 0 }, &progress, None) {
@@ -312,19 +312,19 @@ fn run_export(path: PathBuf, format: disklens_core::export::Format, out: Option<
         }
     };
     let tree = res.tree.read().unwrap();
-    let opts = disklens_core::export::Options { format, root: 0, folders_only, max_depth: depth };
+    let opts = havespace_core::export::Options { format, root: 0, folders_only, max_depth: depth };
     let t0 = Instant::now();
     let result = match &out {
         Some(p) => std::fs::File::create(p).and_then(|f| {
             let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
-            let s = disklens_core::export::export(&tree, opts, &mut w)?;
+            let s = havespace_core::export::export(&tree, opts, &mut w)?;
             w.flush()?;
             Ok(s)
         }),
         None => {
             let stdout = std::io::stdout();
             let mut w = std::io::BufWriter::new(stdout.lock());
-            disklens_core::export::export(&tree, opts, &mut w).and_then(|s| w.flush().map(|_| s))
+            havespace_core::export::export(&tree, opts, &mut w).and_then(|s| w.flush().map(|_| s))
         }
     };
     match result {
@@ -340,10 +340,10 @@ fn run_export(path: PathBuf, format: disklens_core::export::Format, out: Option<
 }
 
 fn run_diff(path: PathBuf, top: usize, against: Option<PathBuf>, save: bool, method: Method, json: bool) -> i32 {
-    use disklens_core::cache::{self, CacheMeta};
-    use disklens_core::diff::{diff, ChangeKind};
+    use havespace_core::cache::{self, CacheMeta};
+    use havespace_core::diff::{diff, ChangeKind};
 
-    let root = disklens_core::scan::root_display_name(&path);
+    let root = havespace_core::scan::root_display_name(&path);
     // Read the baseline before scanning: `--save` replaces it.
     let baseline = match &against {
         Some(f) => cache::load_file(f).map(Some),
@@ -415,7 +415,7 @@ fn run_diff(path: PathBuf, top: usize, against: Option<PathBuf>, save: bool, met
 
     let signed = |v: i64| format!("{}{}", if v < 0 { "-" } else { "+" }, format_bytes(v.unsigned_abs()));
     let ago = format_ago(scanned_at_ms.saturating_sub(old_meta.scanned_at_ms));
-    println!("DiskLens changes in {} since the saved scan ({ago})", tree.path(0));
+    println!("HaveSpace changes in {} since the saved scan ({ago})", tree.path(0));
     println!("  size          {} -> {}  ({})", format_bytes(d.before), format_bytes(d.after), signed(d.after as i64 - d.before as i64));
     println!("  files         {} -> {}", d.files_before, d.files_after);
     println!("  grew          {}  ({} new, {} changed)", format_bytes(d.grew), d.added, d.changed);

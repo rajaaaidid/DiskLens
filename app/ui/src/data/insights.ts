@@ -8,7 +8,7 @@ export interface Hog {
   size: number;
   /** Plain-English explanation. */
   why: string;
-  /** What the user could do about it (DiskLens never does this automatically). */
+  /** What the user could do about it (HaveSpace never does this automatically). */
   advice: string;
   severity: "info" | "reclaimable" | "system";
 }

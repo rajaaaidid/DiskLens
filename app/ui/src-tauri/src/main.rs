@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    disklens_app_lib::run()
+    havespace_app_lib::run()
 }

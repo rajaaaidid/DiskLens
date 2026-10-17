@@ -1,14 +1,14 @@
 //! Real Recycle Bin tests. They put a small fixture file into *your* Recycle Bin, so they are ignored by
 //! default. Run them explicitly:
 //!
-//!     cargo test --release -p disklens-core --test recycle -- --ignored --test-threads=1
+//!     cargo test --release -p havespace-core --test recycle -- --ignored --test-threads=1
 #![cfg(windows)]
 
 use std::fs::File;
 use std::os::windows::io::AsRawHandle;
 
-use disklens_core::actions::{recycle, recycle_bin_capacity, recycle_without_precheck, RecycleItem, TOO_BIG_FOR_BIN};
-use disklens_fixtures::Fixture;
+use havespace_core::actions::{recycle, recycle_bin_capacity, recycle_without_precheck, RecycleItem, TOO_BIG_FOR_BIN};
+use havespace_fixtures::Fixture;
 
 #[test]
 fn temp_drive_has_a_recycle_bin_capacity() {
@@ -21,7 +21,7 @@ fn temp_drive_has_a_recycle_bin_capacity() {
 #[ignore = "touches the real Recycle Bin"]
 fn small_file_goes_to_the_recycle_bin() {
     let fx = Fixture::new("recycle").unwrap();
-    let p = fx.file("DiskLens-recycle-test-delete-me.txt", 1234).unwrap();
+    let p = fx.file("HaveSpace-recycle-test-delete-me.txt", 1234).unwrap();
     let out = recycle(vec![RecycleItem { path: p.to_string_lossy().into_owned(), size: 1234 }]).unwrap();
     assert_eq!(out.recycled.len(), 1, "{out:?}");
     assert!(out.failed.is_empty() && out.permanently_deleted.is_empty());
@@ -42,7 +42,7 @@ fn huge_sparse_file(fx: &Fixture, name: &str) -> (std::path::PathBuf, u64) {
 #[ignore = "touches the real Recycle Bin"]
 fn never_deletes_permanently() {
     let fx = Fixture::new("nuke").unwrap();
-    let (p, size) = huge_sparse_file(&fx, "DiskLens-too-big-for-the-bin.bin");
+    let (p, size) = huge_sparse_file(&fx, "HaveSpace-too-big-for-the-bin.bin");
     let out = recycle(vec![RecycleItem { path: p.to_string_lossy().into_owned(), size }]).unwrap();
     assert!(p.exists(), "the file must still exist: {out:?}");
     assert!(out.recycled.is_empty() && out.permanently_deleted.is_empty());
@@ -56,7 +56,7 @@ fn never_deletes_permanently() {
 #[ignore = "touches the real Recycle Bin"]
 fn tripwire_reports_a_permanent_delete_by_the_shell() {
     let fx = Fixture::new("tripwire").unwrap();
-    let (p, _) = huge_sparse_file(&fx, "DiskLens-tripwire-fixture.bin");
+    let (p, _) = huge_sparse_file(&fx, "HaveSpace-tripwire-fixture.bin");
     let path = p.to_string_lossy().into_owned();
     let out = recycle_without_precheck(vec![path.clone()]).unwrap();
     assert!(out.recycled.is_empty(), "must not be reported as recycled: {out:?}");

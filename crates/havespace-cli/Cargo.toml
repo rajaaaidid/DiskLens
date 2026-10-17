@@ -1,17 +1,17 @@
 [package]
-name = "disklens-cli"
-description = "Command-line front end for the DiskLens scanner."
+name = "havespace-cli"
+description = "Command-line front end for the HaveSpace scanner."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "disklens"
+name = "havespace"
 path = "src/main.rs"
 
 [dependencies]
-disklens-core = { path = "../disklens-core" }
-disklens-fixtures = { path = "../disklens-fixtures" }
+havespace-core = { path = "../havespace-core" }
+havespace-fixtures = { path = "../havespace-fixtures" }
 clap.workspace = true
 serde_json.workspace = true
 

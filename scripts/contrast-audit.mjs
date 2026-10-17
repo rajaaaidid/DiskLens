@@ -1,4 +1,4 @@
-// WCAG contrast audit for DiskLens text on glass. Text sits on translucent panels over a moving aurora,
+// WCAG contrast audit for HaveSpace text on glass. Text sits on translucent panels over a moving aurora,
 // so we composite each text token over each panel over the extreme aurora colours the shader can
 // produce (see AURORA_FN in app/ui/src/treemap/shaders.ts), and report the worst case.
 // Usage: node scripts/contrast-audit.mjs

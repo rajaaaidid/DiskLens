@@ -12,7 +12,7 @@ if (counts.length === 0) counts.push(10000, 60000, 200000);
 
 const proc = spawn(edge, [
   "--headless=new", "--use-angle=d3d11", "--ignore-gpu-blocklist", `--remote-debugging-port=${port}`,
-  `--user-data-dir=${mkdtempSync(join(tmpdir(), "disklens-bench-"))}`, "--window-size=1600,980", "about:blank",
+  `--user-data-dir=${mkdtempSync(join(tmpdir(), "havespace-bench-"))}`, "--window-size=1600,980", "about:blank",
 ], { stdio: "ignore" });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

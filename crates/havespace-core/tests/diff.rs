@@ -1,5 +1,5 @@
-use disklens_core::diff::{diff, ChangeKind};
-use disklens_core::tree::{flags, RawEntry, Tree, ROOT};
+use havespace_core::diff::{diff, ChangeKind};
+use havespace_core::tree::{flags, RawEntry, Tree, ROOT};
 
 fn file(name: &str, size: u64) -> RawEntry {
     RawEntry { name: name.into(), is_dir: false, size, alloc: size, mtime: 0, flags: 0, file_id: None }

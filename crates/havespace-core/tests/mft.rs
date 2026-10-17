@@ -1,9 +1,9 @@
 //! MFT parsing and tree building on synthetic, byte-exact NTFS file records.
 
-use disklens_core::scan::mft::build::{build_tree, Records, ROOT_RECORD};
-use disklens_core::scan::mft::record::{apply_fixup, decode_runlist, parse_record, Batch};
-use disklens_core::scan::Progress;
-use disklens_core::tree::{flags, NodeId, Tree, ROOT};
+use havespace_core::scan::mft::build::{build_tree, Records, ROOT_RECORD};
+use havespace_core::scan::mft::record::{apply_fixup, decode_runlist, parse_record, Batch};
+use havespace_core::scan::Progress;
+use havespace_core::tree::{flags, NodeId, Tree, ROOT};
 
 const REC: usize = 1024;
 const USN: u16 = 0x0007;

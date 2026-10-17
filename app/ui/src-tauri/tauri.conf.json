@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DiskLens",
+  "productName": "HaveSpace",
   "version": "0.2.0",
-  "identifier": "app.disklens.desktop",
+  "identifier": "app.havespace.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "DiskLens",
+        "title": "HaveSpace",
         "width": 1600,
         "height": 980,
         "minWidth": 1100,

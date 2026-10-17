@@ -694,49 +694,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "disklens-app"
-version = "0.2.0"
-dependencies = [
- "disklens-core",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "window-vibrancy 0.6.0",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "disklens-cli"
-version = "0.2.0"
-dependencies = [
- "clap",
- "disklens-core",
- "disklens-fixtures",
- "serde_json",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "disklens-core"
-version = "0.2.0"
-dependencies = [
- "crossbeam-channel",
- "disklens-fixtures",
- "lz4_flex",
- "serde",
- "serde_json",
- "windows 0.58.0",
- "windows-core 0.58.0",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "disklens-fixtures"
-version = "0.2.0"
-
-[[package]]
 name = "dispatch2"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1322,6 +1279,49 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
+name = "havespace-app"
+version = "0.2.0"
+dependencies = [
+ "havespace-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "window-vibrancy 0.6.0",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "havespace-cli"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "havespace-core",
+ "havespace-fixtures",
+ "serde_json",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "havespace-core"
+version = "0.2.0"
+dependencies = [
+ "crossbeam-channel",
+ "havespace-fixtures",
+ "lz4_flex",
+ "serde",
+ "serde_json",
+ "windows 0.58.0",
+ "windows-core 0.58.0",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "havespace-fixtures"
+version = "0.2.0"
 
 [[package]]
 name = "heck"
