@@ -93,6 +93,9 @@ export const mockBackend: Backend = {
   native: false,
   listDrives: async () => FAKE_DRIVES.map((d) => ({ ...d, kind: "fixed" })),
   isElevated: async () => false,
+  restartAsAdmin: async () => {
+    throw new Error("Only the desktop app can restart as administrator.");
+  },
   startScan: async () => {
     generation++;
     const g = generation;

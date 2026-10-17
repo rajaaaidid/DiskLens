@@ -1433,3 +1433,36 @@ input:disabled {
   font-family: var(--mono);
   font-size: 0.92em;
 }
+/* ---------- milestone e: admin / MFT ---------- */
+.picker-note {
+  flex-wrap: wrap;
+  line-height: 1.45;
+}
+.picker-note span {
+  flex: 1 1 420px;
+}
+.picker-note.good {
+  color: var(--good);
+}
+.admin-btn {
+  flex: none;
+}
+.mft-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--accent-2);
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  transition: background 0.15s;
+}
+.mft-hint:hover {
+  background: rgba(34, 211, 238, 0.18);
+}

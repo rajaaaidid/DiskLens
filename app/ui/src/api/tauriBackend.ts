@@ -48,6 +48,7 @@ export const tauriBackend: Backend = {
   native: true,
   listDrives: () => invoke("list_drives"),
   isElevated: () => invoke("is_elevated"),
+  restartAsAdmin: (scan, theme) => invoke("restart_as_admin", { scan, theme }),
   startScan: (path, method) => invoke("start_scan", { path, method }),
   cancelScan: () => invoke("cancel_scan"),
   layout: async (generation, root, width, height, useAlloc) =>

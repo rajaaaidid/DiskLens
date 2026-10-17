@@ -52,6 +52,9 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         threads: usize,
     },
+    /// Scan a drive with the MFT reader and with the directory walk, and compare the results
+    /// (needs administrator rights).
+    Compare { path: PathBuf },
     /// Generate a fake directory tree for testing and benchmarks.
     Fixture {
         path: PathBuf,
@@ -72,6 +75,7 @@ fn main() {
     let code = match cli.cmd {
         Cmd::Scan { path, top, method, threads, json, quiet, show } => run_scan(path, top, method, threads, json, quiet, show),
         Cmd::Bench { path, runs, method, threads } => run_bench(path, runs, method, threads),
+        Cmd::Compare { path } => run_compare(path),
         Cmd::Fixture { path, files, depth, max_file, seed } => {
             let t = Instant::now();
             match disklens_fixtures::generate(&path, files, depth, max_file, seed) {
@@ -255,6 +259,47 @@ fn run_bench(path: PathBuf, runs: usize, method: Method, threads: usize) -> i32 
     }
     times.sort_by(|a, b| a.partial_cmp(b).unwrap());
     println!("best {:.2} s, median {:.2} s (run 1 is the coldest)", times[0], times[times.len() / 2]);
+    0
+}
+
+fn run_compare(path: PathBuf) -> i32 {
+    let mut results = Vec::new();
+    for method in [Method::Mft, Method::Walk] {
+        let progress = Progress::default();
+        match scan(&ScanOptions { root: path.clone(), method, threads: 0 }, &progress, None) {
+            Ok(r) => {
+                let t = std::mem::take(&mut *r.tree.write().unwrap());
+                println!(
+                    "{:<5} {:>7.2} s  {:>9} files  {:>8} folders  {:>10}  on disk {:>10}  inaccessible {}  peak RSS {}",
+                    format!("{method:?}"),
+                    r.elapsed.as_secs_f64(),
+                    t.files[0],
+                    t.dirs[0],
+                    format_bytes(t.size[0]),
+                    format_bytes(t.alloc[0]),
+                    r.inaccessible.len(),
+                    format_bytes(peak_working_set())
+                );
+                results.push(t);
+            }
+            Err(e) => {
+                eprintln!("{method:?} failed: {e}");
+                return 1;
+            }
+        }
+    }
+    let (mft, walk) = (&results[0], &results[1]);
+    println!("\nTop-level folders (MFT vs walk):");
+    let mut rows: Vec<_> = mft.children(0).map(|c| (mft.name(c).to_string(), mft.size[c as usize], walk.child_by_name(0, mft.name(c)).map(|w| walk.size[w as usize]))).collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    for (name, m, w) in rows.iter().take(25) {
+        let diff = match w {
+            Some(w) if *w == *m => "same".to_string(),
+            Some(w) => format!("{:+.2}%", (*m as f64 - *w as f64) / (*w).max(1) as f64 * 100.0),
+            None => "only in MFT".to_string(),
+        };
+        println!("  {:<36} {:>10}  {:>10}  {}", name, format_bytes(*m), w.map(format_bytes).unwrap_or_else(|| "-".into()), diff);
+    }
     0
 }
 

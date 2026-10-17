@@ -1,6 +1,6 @@
 import type { Drive } from "../api";
 import { formatBytes } from "../data/format";
-import { IconFolder, IconLens, IconShield } from "./Icons";
+import { IconBolt, IconFolder, IconLens, IconShield } from "./Icons";
 import { UsageRing } from "./UsageRing";
 
 interface Props {
@@ -8,10 +8,11 @@ interface Props {
   elevated: boolean;
   onScan: (path: string) => void;
   onPickFolder: () => void;
+  onRestartAsAdmin: () => void;
 }
 
 /** Start screen: every local drive as a glass card. */
-export function DrivePicker({ drives, elevated, onScan, onPickFolder }: Props) {
+export function DrivePicker({ drives, elevated, onScan, onPickFolder, onRestartAsAdmin }: Props) {
   return (
     <div className="picker">
       <div className="picker-head">
@@ -51,11 +52,21 @@ export function DrivePicker({ drives, elevated, onScan, onPickFolder }: Props) {
           </div>
         </button>
       </div>
-      {!elevated && (
-        <p className="picker-note">
-          <IconShield /> Running without admin rights, so scans use the parallel directory walk. The much faster NTFS Master File Table
-          scan needs administrator rights (coming in a later build).
+      {elevated ? (
+        <p className="picker-note good">
+          <IconBolt /> Running as administrator: NTFS drives are scanned by reading the Master File Table directly.
         </p>
+      ) : (
+        <div className="picker-note">
+          <IconShield />
+          <span>
+            Without admin rights, scans walk every folder. As administrator, DiskLens reads the NTFS Master File Table directly, which is
+            several times faster and also sees folders your account can't open.
+          </span>
+          <button className="btn btn-secondary admin-btn" onClick={onRestartAsAdmin}>
+            <IconShield /> Restart as administrator
+          </button>
+        </div>
       )}
     </div>
   );

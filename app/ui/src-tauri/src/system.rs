@@ -92,6 +92,38 @@ mod win {
     }
 }
 
+/// Relaunch this executable elevated (UAC prompt) with `args`. Returns once the new process has
+/// started; the caller then exits. Errors if the user declined the prompt.
+#[cfg(windows)]
+pub fn relaunch_elevated(args: &[String]) -> std::io::Result<()> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let exe = std::env::current_exe()?;
+    let wide = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
+    // Quote each argument; a trailing backslash before the closing quote must be doubled ("C:\\").
+    let params: String = args
+        .iter()
+        .map(|a| {
+            let a = if a.ends_with('\\') { format!("{a}\\") } else { a.clone() };
+            format!("\"{a}\"")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (verb, file, params) = (wide("runas"), wide(&exe.to_string_lossy()), wide(&params));
+    let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), params.as_ptr(), std::ptr::null(), SW_SHOWNORMAL) };
+    // ShellExecute returns a value > 32 on success.
+    if r as isize > 32 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn relaunch_elevated(_args: &[String]) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Windows only"))
+}
+
 #[cfg(windows)]
 pub use win::{is_elevated, list_drives};
 

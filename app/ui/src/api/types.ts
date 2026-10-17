@@ -153,6 +153,8 @@ export interface Backend {
   native: boolean;
   listDrives(): Promise<Drive[]>;
   isElevated(): Promise<boolean>;
+  /** Relaunch elevated (UAC prompt) so drive scans can read the MFT; this instance then exits. */
+  restartAsAdmin(scan: string | null, theme: string): Promise<void>;
   startScan(path: string, method?: string): Promise<number>;
   cancelScan(): Promise<void>;
   layout(generation: number, root: number, width: number, height: number, useAlloc: boolean): Promise<Layout>;

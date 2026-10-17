@@ -16,11 +16,15 @@ interface Props {
   onScan: (path: string) => void;
   onPickFolder: () => void;
   onCancel: () => void;
+  elevated: boolean;
+  onRestartAsAdmin: () => void;
 }
 
 const METHOD_LABEL: Record<string, string> = { mft: "MFT fast path", walk: "Directory walk", findfirst: "FindFirstFile walk", auto: "Auto" };
 
-export function Sidebar({ drives, target, scanning, progress, summary, reduceMotion, onScan, onPickFolder, onCancel }: Props) {
+export function Sidebar({ drives, target, scanning, progress, summary, reduceMotion, onScan, onPickFolder, onCancel, elevated, onRestartAsAdmin }: Props) {
+  // A whole-drive scan that couldn't use the MFT only because of missing admin rights.
+  const couldUseMft = !elevated && !scanning && summary?.method === "walk" && /^[A-Za-z]:\\?$/.test(target ?? "") && /administrator/i.test(summary?.fallbackReason ?? "");
   const files = progress?.files ?? summary?.files ?? 0;
   const dirs = progress?.dirs ?? summary?.dirs ?? 0;
   const bytes = summary && !scanning ? summary.size : progress?.bytes ?? 0;
@@ -112,6 +116,11 @@ export function Sidebar({ drives, target, scanning, progress, summary, reduceMot
                 </dd>
               </div>
             </dl>
+            {couldUseMft && (
+              <button className="mft-hint" onClick={onRestartAsAdmin} title={summary?.fallbackReason ?? undefined}>
+                <IconBolt /> Scan much faster by reading the MFT: restart as administrator
+              </button>
+            )}
           </div>
         </>
       )}

@@ -2,17 +2,18 @@
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
 
-> **Status:** milestones (a)–(d) are done: the scanner and CLI, the design mockup, the glass treemap on real
-> scan data in Tauri, and the tree list ↔ treemap linking with space-hog insights and safe actions. Next up:
-> (e) the MFT fast path, then (f) polish (export, cache, packaging).
+> **Status:** milestones (a)–(e) are built: the scanner and CLI, the design mockup, the glass treemap on real
+> scan data in Tauri, tree list ↔ treemap linking with space-hog insights and safe actions, and the NTFS MFT
+> fast path. The MFT reader passes its synthetic-record tests but **hasn't been benchmarked on a real drive
+> yet**, because that needs an elevated run (see below). Next up: (f) polish (export, cache, packaging).
 
 ![C: drive, light theme](docs/screens/c-drive-light.png)
 
 ## Layout
 
 ```
-crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader (WIP), treemap layout, categories
-crates/disklens-cli       `disklens` command-line tool (scan, bench, fixture)
+crates/disklens-core      scanner engine: arena tree, parallel walk, MFT reader, treemap layout, categories, actions
+crates/disklens-cli       `disklens` command-line tool (scan, bench, compare, fixture)
 crates/disklens-fixtures  fake directory tree generator (files, hard links, junctions, symlinks)
 app/ui                    React + TypeScript + WebGL2 front end
 app/ui/src-tauri          Tauri 2 shell: scan session, binary layout IPC, Mica backdrop
@@ -271,9 +272,53 @@ Screenshots: `scripts\screenshot.ps1 -Query "theme=light" -Out docs\mockup\light
 ## Running as administrator (MFT fast path)
 
 Reading the Master File Table requires opening the raw volume (`\\.\C:`), which only an elevated process can do.
-The MFT reader lands in milestone (e). After that:
 
-- **CLI:** open *Terminal (Admin)* and run `disklens scan C:\ --method mft`.
-- **App:** use the "Restart as admin for fast scan" button, or right-click DiskLens and choose *Run as administrator*.
+- **App:** click *Restart as administrator* on the drive picker, or the "Scan much faster…" hint in the sidebar after
+  a drive scan. DiskLens relaunches through the UAC prompt and rescans the same drive. You can also right-click
+  DiskLens and choose *Run as administrator*.
+- **CLI:** open *Terminal (Admin)*. Scan with the MFT:
 
-Without elevation, `--method auto` falls back to the walk and says why.
+  ```bash
+  target\release\disklens.exe scan C:\ --method mft
+  ```
+
+  Time the MFT and compare it against the walk, per top-level folder:
+
+  ```bash
+  target\release\disklens.exe compare C:\
+  ```
+
+  Benchmark every NTFS drive and write `docs\bench-mft.txt`:
+
+  ```bash
+  powershell -ExecutionPolicy Bypass -File scripts\bench-mft.ps1
+  ```
+
+Without elevation, `--method auto` (the default) tries the MFT, gets "reading the MFT needs administrator rights",
+and falls back to the walk. The fallback reason shows in the CLI output and in the app's scan badge tooltip. Folder
+scans always use the walk.
+
+How the MFT path works (`crates/disklens-core/src/scan/mft/`):
+
+1. **Find the MFT.** `FSCTL_GET_NTFS_VOLUME_DATA` gives its location and record size. File record 0 is `$MFT`
+   itself; its `$DATA` runlist gives the MFT's own extents on disk.
+2. **Read and parse.** A reader thread streams those extents in 4 MiB sector-aligned reads. Parser threads (one per
+   core, up to 16) apply each record's update-sequence fixups and extract:
+   - names, skipping DOS 8.3 aliases;
+   - the parent reference and its sequence number;
+   - the unnamed `$DATA` sizes: logical size, plus size on disk with sparse and compressed files handled, and
+     records small enough to live inside the MFT counted as 0 on disk;
+   - the `$STANDARD_INFORMATION` time and attributes, and the reparse tag.
+3. **Build the tree.** Extension records are merged into their base records, so an `$ATTRIBUTE_LIST` never needs
+   reading. The tree is then built breadth-first from the root, record 5.
+   - **Hard links:** a file's extra names show in the tree but count zero.
+   - **Bad links:** parent references with a stale sequence number (orphans) and directory cycles are skipped.
+   - **Junctions and symlinks:** flagged as links, just like in the walk.
+   - **NTFS metafiles** (`$MFT`, `$LogFile`…) appear at the drive root. They use real space, and DiskLens refuses to
+     act on them.
+4. **Fall back to the walk** on anything unexpected: not NTFS, not a whole drive, no admin rights, odd geometry, or an
+   MFT so fragmented that its own extents continue in an attribute list.
+
+`tests/mft.rs` builds byte-exact FILE records, with fixups, resident and non-resident `$DATA`, sparse streams,
+extension records, DOS names, reparse points, orphans and cycles, and checks the parser and the tree builder
+against them.

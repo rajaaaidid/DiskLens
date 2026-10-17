@@ -33,6 +33,10 @@ pub fn protection(path: &str) -> Protection {
     }
     let top = c[1].as_str();
     let depth = c.len() - 1; // components below the drive root
+    if top.starts_with('$') && !matches!(top, "$recycle.bin" | "$windows.~bt" | "$windows.~ws" | "$sysreset" | "$winreagent") {
+        // NTFS metafiles ($MFT, $LogFile, $Extend...) as listed by the MFT scan.
+        return Protection::Blocked("Part of the NTFS file system itself.");
+    }
     match top {
         "windows" => return Protection::Blocked("Part of Windows. Use Disk Cleanup or Storage settings to reclaim space here."),
         "system volume information" | "$recycle.bin" | "recovery" | "boot" | "$winreagent" | "$windows.~bt" | "$windows.~ws" | "$sysreset" => {
@@ -79,6 +83,8 @@ mod tests {
             r"C:\Users",
             r"C:\Users\me",
             r"C:\Users\me\AppData",
+            r"C:\$MFT",
+            r"C:\$Extend\$UsnJrnl",
         ] {
             assert!(matches!(protection(p), Protection::Blocked(_)), "{p} should be blocked");
         }

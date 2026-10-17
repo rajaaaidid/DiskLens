@@ -124,6 +124,29 @@ fn is_elevated() -> bool {
     system::is_elevated()
 }
 
+/// Restart DiskLens as administrator (UAC prompt) so drive scans can read the MFT directly. `scan` is
+/// passed on so the elevated instance starts scanning the same place. Exits this instance on success.
+#[tauri::command]
+fn restart_as_admin(app: AppHandle, scan: Option<String>, theme: Option<String>) -> Result<(), String> {
+    let mut args = Vec::new();
+    if let Some(s) = scan {
+        args.push(s);
+    }
+    if let Some(t) = theme {
+        args.push("--theme".into());
+        args.push(t);
+    }
+    system::relaunch_elevated(&args).map_err(|e| {
+        if e.raw_os_error() == Some(1223) {
+            "The administrator prompt was declined.".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
+    app.exit(0);
+    Ok(())
+}
+
 /// Start scanning `path`. Any running scan is cancelled. Returns the new generation.
 #[tauri::command]
 fn start_scan(app: AppHandle, state: State<'_, AppState>, path: String, method: Option<String>) -> Result<u64, String> {
@@ -616,6 +639,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_drives,
             is_elevated,
+            restart_as_admin,
             start_scan,
             cancel_scan,
             scan_summary,

@@ -367,6 +367,10 @@ export default function App() {
     backend.findPath(summary.generation, path).then((id) => id !== null && zoomTo(id));
   }, [summary, zoomTo]);
 
+  const restartAsAdmin = useCallback(() => {
+    backend.restartAsAdmin(target, theme).catch((e) => toast("info", "Still running without admin rights", String(e)));
+  }, [target, theme, toast]);
+
   const pickFolder = useCallback(async () => {
     const p = await backend.pickFolder();
     if (p) startScan(p);
@@ -392,7 +396,7 @@ export default function App() {
           }
         />
         {showPicker ? (
-          <DrivePicker drives={drives} elevated={elevated} onScan={startScan} onPickFolder={pickFolder} />
+          <DrivePicker drives={drives} elevated={elevated} onScan={startScan} onPickFolder={pickFolder} onRestartAsAdmin={restartAsAdmin} />
         ) : (
           <div className="workspace">
             <Sidebar
@@ -405,6 +409,8 @@ export default function App() {
               onScan={startScan}
               onPickFolder={pickFolder}
               onCancel={() => backend.cancelScan()}
+              elevated={elevated}
+              onRestartAsAdmin={restartAsAdmin}
             />
             <main className="main">
               <div className="toolbar glass">
