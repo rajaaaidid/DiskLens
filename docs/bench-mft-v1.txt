@@ -1,0 +1,154 @@
+﻿DiskLens MFT benchmark  2026-10-17T11:04:32
+
+elevated: True
+
+=== C:\  (339 GB used) ===
+--- MFT, 3 runs ---
+[profile] mft: 1387264 records (1354 MiB), read+parse 9509 ms, total 9920 ms, 0 orphans, 80839 extra hard-link names
+run 1:   9.99 s  Mft  1061118 files  264235 folders  343 GB  tree 109 MB  peak RSS 492 MB
+[profile] mft: 1387264 records (1354 MiB), read+parse 7604 ms, total 8021 ms, 0 orphans, 80839 extra hard-link names
+run 2:   8.09 s  Mft  1061118 files  264235 folders  343 GB  tree 109 MB  peak RSS 495 MB
+[profile] mft: 1387264 records (1354 MiB), read+parse 7434 ms, total 7851 ms, 0 orphans, 80839 extra hard-link names
+run 3:   7.92 s  Mft  1061118 files  264235 folders  343 GB  tree 109 MB  peak RSS 495 MB
+best 7.92 s, median 8.09 s (run 1 is the coldest)
+--- MFT vs walk ---
+[profile] mft: 1387264 records (1354 MiB), read+parse 8063 ms, total 8488 ms, 0 orphans, 80839 extra hard-link names
+Mft      8.56 s    1061118 files    264235 folders      343 GB  on disk     338 GB  inaccessible 0  peak RSS 492 MB
+[profile] threads 24: enumerate 972.2s total across workers, builder busy 1.31s idle 39.49s
+Walk    40.81 s    1061029 files    264201 folders      333 GB  on disk     328 GB  inaccessible 20  peak RSS 492 MB
+
+Top-level folders (MFT vs walk):
+  Users                                    150 GB      150 GB  +0.09%
+  Program Files                           61.0 GB     61.2 GB  -0.42%
+  Windows                                 40.7 GB     40.3 GB  +0.87%
+  pagefile.sys                            30.0 GB     30.0 GB  same
+  Program Files (x86)                     25.0 GB     25.0 GB  +0.09%
+  ProgramData                             11.9 GB     11.9 GB  +0.57%
+  System Volume Information                8.0 GB         0 B  +856927514800.00%
+  Claude                                   6.5 GB      6.5 GB  same
+  hiberfil.sys                             6.4 GB      6.4 GB  same
+  $MFT                                     1.3 GB           -  only in MFT
+  MSOCache                                 903 MB      903 MB  same
+  adobeTemp                                640 MB      640 MB  same
+  $RECYCLE.BIN                             264 MB      264 MB  same
+  $SysReset                               67.9 MB     67.9 MB  same
+  $LogFile                                64.0 MB           -  only in MFT
+  AMD                                     60.5 MB     60.5 MB  same
+  $Extend                                 33.8 MB           -  only in MFT
+  swapfile.sys                            16.0 MB     16.0 MB  same
+  $Bitmap                                 14.9 MB           -  only in MFT
+  Config.Msi                              11.3 MB     11.3 MB  same
+  office                                  10.8 MB     10.8 MB  same
+  WRP29D0.tmp                              930 KB      930 KB  same
+  $Windows.~WS                             389 KB      389 KB  same
+  MSI                                      152 KB      152 KB  same
+  $UpCase                                  128 KB           -  only in MFT
+
+=== D:\  (89 GB used) ===
+--- MFT, 3 runs ---
+[profile] mft: 1280 records (1 MiB), read+parse 8 ms, total 8 ms, 0 orphans, 0 extra hard-link names
+run 1:   0.01 s  Mft  1176 files  41 folders  88.6 GB  tree 81.5 KB  peak RSS 6.1 MB
+[profile] mft: 1280 records (1 MiB), read+parse 4 ms, total 4 ms, 0 orphans, 0 extra hard-link names
+run 2:   0.00 s  Mft  1176 files  41 folders  88.6 GB  tree 81.5 KB  peak RSS 6.2 MB
+[profile] mft: 1280 records (1 MiB), read+parse 2 ms, total 2 ms, 0 orphans, 0 extra hard-link names
+run 3:   0.00 s  Mft  1176 files  41 folders  88.6 GB  tree 81.5 KB  peak RSS 6.6 MB
+best 0.00 s, median 0.00 s (run 1 is the coldest)
+--- MFT vs walk ---
+[profile] mft: 1280 records (1 MiB), read+parse 3 ms, total 3 ms, 0 orphans, 0 extra hard-link names
+Mft      0.00 s       1176 files        41 folders     88.6 GB  on disk    88.6 GB  inaccessible 0  peak RSS 6.2 MB
+[profile] threads 24: enumerate 0.0s total across workers, builder busy 0.00s idle 0.00s
+Walk     0.00 s       1154 files        30 folders     88.5 GB  on disk    88.5 GB  inaccessible 1  peak RSS 11.0 MB
+
+Top-level folders (MFT vs walk):
+  Pictures                                88.5 GB     88.5 GB  same
+  $LogFile                                64.0 MB           -  only in MFT
+  $Extend                                 20.1 MB           -  only in MFT
+  $Bitmap                                  4.7 MB           -  only in MFT
+  $MFT                                     1.2 MB           -  only in MFT
+  Receipts                                 348 KB      348 KB  same
+  Files                                    261 KB      261 KB  same
+  $UpCase                                  128 KB           -  only in MFT
+  System Volume Information               20.1 KB         0 B  +2056800.00%
+  $RECYCLE.BIN                             8.1 KB      8.1 KB  same
+  $Boot                                    8.0 KB           -  only in MFT
+  $MFTMirr                                 4.0 KB           -  only in MFT
+  $AttrDef                                 2.5 KB           -  only in MFT
+  $Volume                                     0 B           -  only in MFT
+  $BadClus                                    0 B           -  only in MFT
+  $Secure                                     0 B           -  only in MFT
+  Message                                     0 B         0 B  same
+
+=== E:\  (279 GB used) ===
+--- MFT, 3 runs ---
+[profile] mft: 256 records (0 MiB), read+parse 9 ms, total 9 ms, 0 orphans, 0 extra hard-link names
+run 1:   0.01 s  Mft  75 files  21 folders  279 GB  tree 7.9 KB  peak RSS 5.0 MB
+[profile] mft: 256 records (0 MiB), read+parse 9 ms, total 10 ms, 0 orphans, 0 extra hard-link names
+run 2:   0.01 s  Mft  75 files  21 folders  279 GB  tree 7.9 KB  peak RSS 5.1 MB
+[profile] mft: 256 records (0 MiB), read+parse 9 ms, total 9 ms, 0 orphans, 0 extra hard-link names
+run 3:   0.01 s  Mft  75 files  21 folders  279 GB  tree 7.9 KB  peak RSS 5.1 MB
+best 0.01 s, median 0.01 s (run 1 is the coldest)
+--- MFT vs walk ---
+[profile] mft: 256 records (0 MiB), read+parse 9 ms, total 9 ms, 0 orphans, 0 extra hard-link names
+Mft      0.01 s         75 files        21 folders      279 GB  on disk     279 GB  inaccessible 0  peak RSS 4.9 MB
+[profile] threads 24: enumerate 0.0s total across workers, builder busy 0.00s idle 0.00s
+Walk     0.00 s         53 files        10 folders      279 GB  on disk     279 GB  inaccessible 1  peak RSS 7.6 MB
+
+Top-level folders (MFT vs walk):
+  Bukit Broga                              220 GB      220 GB  same
+  Gunung Angsi                            55.5 GB     55.5 GB  same
+  GoKart                                   3.1 GB      3.1 GB  same
+  $LogFile                                64.0 MB           -  only in MFT
+  $Extend                                 20.1 MB           -  only in MFT
+  $Bitmap                                 14.1 MB           -  only in MFT
+  $MFT                                     256 KB           -  only in MFT
+  $UpCase                                  128 KB           -  only in MFT
+  System Volume Information               20.1 KB         0 B  +2056800.00%
+  $Boot                                    8.0 KB           -  only in MFT
+  $MFTMirr                                 4.0 KB           -  only in MFT
+  $AttrDef                                 2.5 KB           -  only in MFT
+  $RECYCLE.BIN                              258 B       258 B  same
+  $Volume                                     0 B           -  only in MFT
+  $BadClus                                    0 B           -  only in MFT
+  $Secure                                     0 B           -  only in MFT
+
+=== G:\  (598 GB used) ===
+--- MFT, 3 runs ---
+[profile] mft: 278272 records (271 MiB), read+parse 1102 ms, total 1178 ms, 0 orphans, 383 extra hard-link names
+run 1:   1.19 s  Mft  243619 files  27155 folders  597 GB  tree 18.6 MB  peak RSS 98.0 MB
+[profile] mft: 278272 records (271 MiB), read+parse 394 ms, total 471 ms, 0 orphans, 383 extra hard-link names
+run 2:   0.48 s  Mft  243619 files  27155 folders  597 GB  tree 18.6 MB  peak RSS 99.2 MB
+[profile] mft: 278272 records (271 MiB), read+parse 393 ms, total 469 ms, 0 orphans, 383 extra hard-link names
+run 3:   0.48 s  Mft  243619 files  27155 folders  597 GB  tree 18.6 MB  peak RSS 99.8 MB
+best 0.48 s, median 0.48 s (run 1 is the coldest)
+--- MFT vs walk ---
+[profile] mft: 278272 records (271 MiB), read+parse 392 ms, total 466 ms, 0 orphans, 383 extra hard-link names
+Mft      0.48 s     243619 files     27155 folders      597 GB  on disk     598 GB  inaccessible 0  peak RSS 98.8 MB
+[profile] threads 24: enumerate 33.0s total across workers, builder busy 0.20s idle 1.18s
+Walk     1.38 s     243594 files     27144 folders      597 GB  on disk     597 GB  inaccessible 1  peak RSS 98.8 MB
+
+Top-level folders (MFT vs walk):
+  SteamLibrary                             421 GB      421 GB  +0.00%
+  XboxGames                                160 GB      160 GB  same
+  EA Games                                12.3 GB     12.3 GB  same
+  EpicGamesLibrary                         2.2 GB      2.2 GB  same
+  Wondershare                              651 MB      651 MB  same
+  $MFT                                     272 MB           -  only in MFT
+  Program Files                            234 MB      234 MB  same
+  Minecraft                                141 MB      141 MB  same
+  $LogFile                                64.0 MB           -  only in MFT
+  WpSystem                                26.9 MB     26.9 MB  same
+  $Bitmap                                 24.4 MB           -  only in MFT
+  $Extend                                 20.1 MB           -  only in MFT
+  $RECYCLE.BIN                             1.9 MB      1.9 MB  same
+  $UpCase                                  128 KB           -  only in MFT
+  System Volume Information               20.1 KB         0 B  +2059200.00%
+  $Boot                                    8.0 KB           -  only in MFT
+  $MFTMirr                                 4.0 KB           -  only in MFT
+  $AttrDef                                 2.5 KB           -  only in MFT
+  .GamingRoot                                28 B        28 B  same
+  $Volume                                     0 B           -  only in MFT
+  $BadClus                                    0 B           -  only in MFT
+  $Secure                                     0 B           -  only in MFT
+  WindowsApps                                 0 B         0 B  same
+  WUDownloadCache                             0 B         0 B  same
+  Downloads                                   0 B         0 B  same

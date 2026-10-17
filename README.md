@@ -2,10 +2,10 @@
 
 A fast disk space analyzer for Windows 11: WizTree-class scanning with a glassmorphism treemap.
 
-> **Status:** milestones (a)–(e) are built: the scanner and CLI, the design mockup, the glass treemap on real
+> **Status:** milestones (a)–(e) are done: the scanner and CLI, the design mockup, the glass treemap on real
 > scan data in Tauri, tree list ↔ treemap linking with space-hog insights and safe actions, and the NTFS MFT
-> fast path. The MFT reader passes its synthetic-record tests but **hasn't been benchmarked on a real drive
-> yet**, because that needs an elevated run (see below). Next up: (f) polish (export, cache, packaging).
+> fast path. The MFT path scans C: (1.06M files) in **4.5–6.3 s**, against about 30 s for the walk.
+> Next up: (f) polish (export, cache, packaging).
 
 ![C: drive, light theme](docs/screens/c-drive-light.png)
 
@@ -188,8 +188,25 @@ Ryzen 5 5500 (6C/12T), NVMe SSD, Windows 11, Defender real-time protection on.
 | `C:\` (300 GB) | 944k / 240k | walk, warm | **20.6 s** | 153 MB |
 | `C:\` (318 GB*) | 1.03M / 240k | FindFirstFileEx, warm | 20.8 s | 137 MB |
 | `C:\Program Files` | 106k / 12k | walk, warm | 0.5–1.0 s | 23 MB |
-
 | `C:\` in the app, streaming | 962k / 244k | walk, warm | 22–27 s | – |
+| `C:\` (343 GB†) | 1.06M / 264k | **MFT**, first run | **6.3 s** | 309 MB |
+| `C:\` (343 GB†) | 1.06M / 264k | **MFT**, warm | **4.5 s** | 309 MB |
+| `C:\` (as admin) | 1.06M / 264k | walk, same session | 29.6 s | – |
+| `G:\` (597 GB) | 244k / 27k | **MFT**, warm | **0.42 s** | 60 MB |
+
+The MFT rows come from `scripts\bench-mft.ps1`; the full output is in `docs/bench-mft.txt`.
+
+- **Throughput:** C: reads at about 330 MB/s of MFT and is read-bound (parsing keeps up with the reads); G: reaches
+  about 750 MB/s.
+- **Memory:** the 309 MB peak is the 109 MB tree plus 144 MB of parsed records, which are freed once the tree is
+  built.
+- **History:** the first version parsed each record into heap-allocated names and read with a single thread. It
+  took 7.9–10 s and peaked at 492 MB (`docs/bench-mft-v1.txt`).
+
+† The MFT sees about 10 GB the walk can't, even as administrator: `System Volume Information` (8 GB of restore
+points) and NTFS's own files (`$MFT` alone is 1.3 GB). Elsewhere, top-level folders agree with the walk within
+±0.9%, and file counts are within 89 of each other out of 1.06M. The small per-folder shifts are hard-linked files
+being attributed to a different folder (Windows vs Program Files).
 
 Wall times on C: vary by roughly ±30% from run to run on this machine, depending on background load. In the same
 session the CLI took 25–36 s. The app's tree builder is busy for only about 1.3 s of a scan, so streaming the
@@ -205,8 +222,8 @@ What these numbers show:
   beyond 2 threads (1 thread: 23 s; 4–48 threads: about 12 s). Opening folders by file ID instead of by path made no
   difference, so path parsing isn't the cause. The serialization is below the API, most likely file-system filter
   drivers such as Defender on-access scanning.
-- **The first cold scan misses the 60 s target.** Warm scans are well under it. The MFT reader (milestone e) avoids
-  per-folder opens entirely and is the path meant to deliver the under-10-second goal.
+- **The first cold walk of C: missed the 60 s target** (72.8 s); warm walks are well under it. As administrator, the
+  MFT path avoids per-folder opens entirely and scans C: in 4.5–6.3 s, under the 10-second goal.
 
 ### Treemap renderer
 

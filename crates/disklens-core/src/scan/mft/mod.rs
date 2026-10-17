@@ -43,8 +43,8 @@ mod win {
     use windows_sys::Win32::System::Ioctl::{FSCTL_GET_NTFS_VOLUME_DATA, NTFS_VOLUME_DATA_BUFFER};
     use windows_sys::Win32::System::IO::DeviceIoControl;
 
-    use super::build::{build_tree, merge};
-    use super::record::{apply_fixup, data_runlist, decode_runlist, parse_record, Parsed};
+    use super::build::{build_tree, Records};
+    use super::record::{apply_fixup, data_runlist, decode_runlist, parse_record, Batch};
     use crate::scan::root_display_name;
 
     /// Bytes per read request. Large sequential reads keep NVMe/SATA drives at full speed.
@@ -139,67 +139,90 @@ mod win {
             return Err(unsupported("the MFT is too fragmented to read directly (its extents continue in an attribute list)"));
         }
 
-        // Reader thread -> parser workers -> collector.
-        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 16);
-        let (chunk_tx, chunk_rx) = bounded::<(usize, Vec<u8>)>(workers * 2);
-        let (out_tx, out_rx) = bounded::<Vec<Parsed>>(workers * 2);
-        let read_err: std::sync::Mutex<Option<io::Error>> = std::sync::Mutex::new(None);
+        // Split the extents into read jobs of up to CHUNK bytes: (byte offset, first record, records).
+        let mut jobs: Vec<(Option<u64>, usize, usize)> = Vec::new();
+        let mut rec_no = 0usize;
+        let per_chunk = (CHUNK / rec_size).max(1);
+        for &(lcn, len) in &extents {
+            let mut recs_left = ((len * cluster) as usize / rec_size).min(total_records.saturating_sub(rec_no));
+            let mut off = 0u64;
+            while recs_left > 0 {
+                let n = recs_left.min(per_chunk);
+                jobs.push((lcn.map(|l| l * cluster + off), rec_no, n));
+                rec_no += n;
+                recs_left -= n;
+                off += (n * rec_size) as u64;
+            }
+        }
+        let extent_count = extents.len();
 
-        let parsed: Vec<Parsed> = std::thread::scope(|s| {
-            // Reader.
-            let vol = &vol;
-            let read_err = &read_err;
-            s.spawn(move || {
-                let mut rec_no = 0usize;
-                'extents: for (lcn, len) in extents {
-                    let bytes = len * cluster;
-                    let mut off = 0u64;
-                    while off < bytes {
-                        if rec_no >= total_records || progress.is_cancelled() {
-                            break 'extents;
+        // Reader threads (each with its own volume handle, so reads overlap) -> parsers -> collector.
+        let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let readers = 4usize.min(jobs.len().max(1));
+        let parsers = cores.clamp(2, 16);
+        let next_job = std::sync::atomic::AtomicUsize::new(0);
+        let (chunk_tx, chunk_rx) = bounded::<(usize, Vec<u8>)>(parsers * 2);
+        let (out_tx, out_rx) = bounded::<Batch>(parsers * 2);
+        let read_err: std::sync::Mutex<Option<io::Error>> = std::sync::Mutex::new(None);
+        let volume_path = format!(r"\\.\{}", &root_s[..2]);
+        let read_done_ms = std::sync::atomic::AtomicU64::new(0);
+
+        let batches: Vec<Batch> = std::thread::scope(|s| {
+            for _ in 0..readers {
+                let (jobs, next_job, read_err, chunk_tx, volume_path, read_done_ms) = (&jobs, &next_job, &read_err, chunk_tx.clone(), &volume_path, &read_done_ms);
+                s.spawn(move || {
+                    let vol = match OpenOptions::new().read(true).open(volume_path) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            *read_err.lock().unwrap() = Some(e);
+                            return;
                         }
-                        let want = ((bytes - off) as usize).min(CHUNK);
-                        let recs_here = (want / rec_size).min(total_records - rec_no);
-                        let read_len = (recs_here * rec_size).div_ceil(cluster as usize) * cluster as usize;
+                    };
+                    loop {
+                        let j = next_job.fetch_add(1, Ordering::Relaxed);
+                        if j >= jobs.len() || progress.is_cancelled() {
+                            break;
+                        }
+                        let (offset, first, n) = jobs[j];
+                        let read_len = (n * rec_size).div_ceil(cluster as usize) * cluster as usize;
                         let mut buf = vec![0u8; read_len];
-                        if let Some(l) = lcn {
-                            if let Err(e) = read_at(vol, &mut buf, l * cluster + off) {
+                        if let Some(o) = offset {
+                            if let Err(e) = read_at(&vol, &mut buf, o) {
                                 *read_err.lock().unwrap() = Some(e);
-                                break 'extents;
+                                break;
                             }
                         }
-                        buf.truncate(recs_here * rec_size);
-                        if chunk_tx.send((rec_no, buf)).is_err() {
-                            break 'extents;
+                        buf.truncate(n * rec_size);
+                        if chunk_tx.send((first, buf)).is_err() {
+                            break;
                         }
-                        rec_no += recs_here;
-                        off += (recs_here * rec_size) as u64;
                     }
-                }
-            });
-            // Parsers.
-            for _ in 0..workers {
+                    read_done_ms.fetch_max(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+                });
+            }
+            drop(chunk_tx);
+            for _ in 0..parsers {
                 let rx = chunk_rx.clone();
                 let tx = out_tx.clone();
                 s.spawn(move || {
                     for (first, mut buf) in rx.iter() {
-                        let mut out = Vec::with_capacity(buf.len() / rec_size);
+                        let mut out = Batch::with_capacity(buf.len() / rec_size);
                         let (mut files, mut dirs) = (0u64, 0u64);
                         for (i, rec) in buf.chunks_exact_mut(rec_size).enumerate() {
-                            if !apply_fixup(rec) {
-                                continue;
-                            }
-                            if let Some(p) = parse_record(rec, (first + i) as u32) {
-                                if p.base == p.rec && !p.names.is_empty() {
-                                    if p.is_dir {
+                            if apply_fixup(rec) && parse_record(rec, (first + i) as u32, &mut out) {
+                                let r = out.recs.last().unwrap();
+                                if r.base == r.rec && r.name_count > 0 {
+                                    if r.is_dir {
                                         dirs += 1;
                                     } else {
                                         files += 1;
                                     }
                                 }
-                                out.push(p);
                             }
                         }
+                        out.recs.shrink_to_fit();
+                        out.names.shrink_to_fit();
+                        out.text.shrink_to_fit();
                         // Rough live counters while reading; exact totals come from the tree build.
                         progress.dirs.fetch_add(dirs, Ordering::Relaxed);
                         progress.files.fetch_add(files, Ordering::Relaxed);
@@ -211,11 +234,7 @@ mod win {
             }
             drop(chunk_rx);
             drop(out_tx);
-            let mut all = Vec::with_capacity(total_records);
-            for v in out_rx.iter() {
-                all.extend(v);
-            }
-            all
+            out_rx.iter().collect()
         });
         if let Some(e) = read_err.into_inner().unwrap() {
             return Err(e);
@@ -223,23 +242,26 @@ mod win {
         if progress.is_cancelled() {
             return Ok(());
         }
-        let read_ms = start.elapsed().as_millis();
+        let parse_ms = start.elapsed().as_millis();
 
-        let mut recs = merge(parsed, total_records);
+        let recs = Records::new(batches, total_records);
+        let records_mib = recs.heap_bytes() >> 20;
         // Reset the rough counters; the build reports exact numbers.
         progress.files.store(0, Ordering::Relaxed);
         progress.dirs.store(0, Ordering::Relaxed);
         progress.bytes.store(0, Ordering::Relaxed);
         let stats = {
             let mut t = tree.write().unwrap();
-            let stats = build_tree(&mut t, &mut recs, progress);
+            let stats = build_tree(&mut t, &recs, progress);
             t.shrink_to_fit();
             stats
         };
+        drop(recs);
         if std::env::var_os("DISKLENS_PROFILE").is_some() {
             eprintln!(
-                "[profile] mft: {total_records} records ({} MiB), read+parse {read_ms} ms, total {} ms, {} orphans, {} extra hard-link names",
+                "[profile] mft: {total_records} records ({} MiB) in {extent_count} extents, {readers} readers/{parsers} parsers: read {} ms, read+parse {parse_ms} ms, total {} ms; parsed records {records_mib} MiB; {} orphans, {} extra hard-link names",
                 (total_records * rec_size) >> 20,
+                read_done_ms.load(Ordering::Relaxed),
                 start.elapsed().as_millis(),
                 stats.orphans,
                 stats.hardlink_names

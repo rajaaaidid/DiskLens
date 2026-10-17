@@ -8,6 +8,7 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 $lines += "elevated: $admin"
 foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystem -eq 'NTFS' -and $_.DriveType -eq 'Fixed' } | Sort-Object DriveLetter) {
   $drive = "$($v.DriveLetter):\"
+  Write-Host "Benchmarking $drive (MFT x3, then MFT vs walk)..."
   $lines += ""
   $lines += "=== $drive  ($([math]::Round(($v.Size - $v.SizeRemaining) / 1GB)) GB used) ==="
   $lines += "--- MFT, 3 runs ---"
@@ -17,3 +18,4 @@ foreach ($v in Get-Volume | Where-Object { $_.DriveLetter -and $_.FileSystem -eq
 }
 $lines | Out-File -FilePath $Out -Encoding utf8
 "done" | Out-File -FilePath "$Out.done" -Encoding utf8
+Write-Host "Done. Results written to $Out"

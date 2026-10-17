@@ -295,7 +295,9 @@ fn run_compare(path: PathBuf) -> i32 {
     for (name, m, w) in rows.iter().take(25) {
         let diff = match w {
             Some(w) if *w == *m => "same".to_string(),
-            Some(w) => format!("{:+.2}%", (*m as f64 - *w as f64) / (*w).max(1) as f64 * 100.0),
+            Some(0) => "walk could not read it".to_string(),
+            Some(w) => format!("{:+.2}%", (*m as f64 - *w as f64) / *w as f64 * 100.0),
+            None if name.starts_with('$') => "NTFS metadata (MFT only)".to_string(),
             None => "only in MFT".to_string(),
         };
         println!("  {:<36} {:>10}  {:>10}  {}", name, format_bytes(*m), w.map(format_bytes).unwrap_or_else(|| "-".into()), diff);
